@@ -3,16 +3,22 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches:
+      - main
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Extract Android project
+        shell: bash
         run: |
           unzip -q Ethiopia_Events_Android_Starter_v2.zip
           test -f ethio-events-android/settings.gradle.kts
@@ -30,7 +36,16 @@ jobs:
           packages: 'platform-tools'
 
       - name: Install Android SDK components
-        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
+        shell: bash
+        run: |
+          sdkmanager --install "platforms;android-37.0" "build-tools;36.0.0"
+
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+
+          rm -rf "$ANDROID_HOME/platforms/android-37"
+          ln -s android-37.0 "$ANDROID_HOME/platforms/android-37"
+
+          test -f "$ANDROID_HOME/platforms/android-37/android.jar"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
