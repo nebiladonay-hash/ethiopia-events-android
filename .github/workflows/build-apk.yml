@@ -20,7 +20,7 @@ jobs:
       - name: Extract Android project
         shell: bash
         run: |
-          unzip -q Ethiopia_Events_Android_Starter_v2.zip
+          unzip -q Ethiopia_Events_Android_Starter_v3.zip
           test -f ethio-events-android/settings.gradle.kts
           echo "PROJECT_DIR=$GITHUB_WORKSPACE/ethio-events-android" >> "$GITHUB_ENV"
 
