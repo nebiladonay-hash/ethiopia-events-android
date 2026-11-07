@@ -1,4 +1,4 @@
-name: Build Android APK and optional signed release
+name: Build Android APK and optional signed release 
 
 on:
   workflow_dispatch:
