@@ -64,7 +64,7 @@ jobs:
           path: ethio-events-android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      - name: Configure release signing
+      - name: Configure release signing 
         id: release_signing
         if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && env.ANDROID_KEYSTORE_PASSWORD != '' && env.ANDROID_KEY_ALIAS != '' && env.ANDROID_KEY_PASSWORD != '' }}
         shell: bash
