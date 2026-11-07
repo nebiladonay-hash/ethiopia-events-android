@@ -1,87 +1,95 @@
-name: Build Tiqet Android V6
+name: Tiqet V6 Android Build
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-    paths:
-      - 'Tiqet_Android_V6.zip'
-      - '.github/workflows/build-tiqet-v6.yml'
-      - 'tiqet-android/**'
 
 permissions:
   contents: read
 
 jobs:
   build:
+    name: Build Tiqet V6 APK
     runs-on: ubuntu-latest
     env:
       SUPABASE_URL: ${{ vars.SUPABASE_URL }}
       SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
 
     steps:
-      - name: Check out source repository
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Extract Tiqet V6 project
+      - name: Locate and extract Tiqet V6 source
         shell: bash
         run: |
-          unzip -q Tiqet_Android_V6.zip -d "$GITHUB_WORKSPACE"
-          test -f "$GITHUB_WORKSPACE/tiqet-android/settings.gradle.kts"
-          test -f "$GITHUB_WORKSPACE/tiqet-android/app/src/main/java/et/events/mobile/MainActivity.kt"
-          test -f "$GITHUB_WORKSPACE/tiqet-android/supabase/migrations/001_tiqet_core.sql"
-          echo "PROJECT_DIR=$GITHUB_WORKSPACE/tiqet-android" >> "$GITHUB_ENV"
+          set -euo pipefail
+          ZIP_FILE="$(find . -maxdepth 2 -type f \( -iname 'Tiqet_V6_Source.zip' -o -iname 'Tiqet_Android_V6.zip' \) -print -quit)"
+          if [[ -z "$ZIP_FILE" ]]; then
+            echo "Tiqet V6 source ZIP was not found in the repository root."
+            echo "Repository files:"
+            find . -maxdepth 2 -type f | sort | head -200
+            exit 1
+          fi
+          echo "Using source archive: $ZIP_FILE"
+          unzip -q "$ZIP_FILE" -d "$RUNNER_TEMP/tiqet-source"
+          PROJECT_DIR="$RUNNER_TEMP/tiqet-source/tiqet-android"
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          test -f "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
+          test -f "$PROJECT_DIR/supabase/migrations/001_tiqet_core.sql"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK tools
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools'
 
-      - name: Install Android 37 SDK and build tools
+      - name: Install Android SDK platform and build tools
         shell: bash
         run: |
+          set -euo pipefail
           sdkmanager --install "platforms;android-37.0" "build-tools;36.0.0"
           test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
           ln -sfn android-37.0 "$ANDROID_HOME/platforms/android-37"
           test -f "$ANDROID_HOME/platforms/android-37/android.jar"
 
-      - name: Set up Gradle 9.3.1
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
-      - name: Check Supabase configuration
+      - name: Verify Supabase client configuration
         shell: bash
         run: |
           if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_ANON_KEY" ]]; then
-            echo "::warning::SUPABASE_URL or SUPABASE_ANON_KEY is missing. The APK will compile, but sign-in and server-backed features will be unavailable until repository variables are configured."
+            echo "::warning::SUPABASE_URL or SUPABASE_ANON_KEY is missing."
           else
-            echo "Supabase URL and public client key found."
+            echo "Supabase project URL and publishable key are configured."
           fi
 
-      - name: Build Tiqet debug APK
+      - name: Assemble Tiqet V6 debug APK
         run: gradle --no-daemon -p "$PROJECT_DIR" assembleDebug
 
-      - name: Upload Tiqet debug APK
+      - name: Upload Tiqet V6 APK
         uses: actions/upload-artifact@v4
         with:
           name: tiqet-v6-debug-apk
-          path: tiqet-android/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      - name: Upload Supabase backend files
+      - name: Upload Tiqet Supabase backend files
         uses: actions/upload-artifact@v4
         with:
           name: tiqet-v6-supabase-backend
           path: |
-            tiqet-android/supabase/migrations/001_tiqet_core.sql
-            tiqet-android/supabase/functions/**
-            tiqet-android/supabase/config.toml
+            ${{ env.PROJECT_DIR }}/supabase/migrations/001_tiqet_core.sql
+            ${{ env.PROJECT_DIR }}/supabase/functions/**
+            ${{ env.PROJECT_DIR }}/supabase/config.toml
           if-no-files-found: error
