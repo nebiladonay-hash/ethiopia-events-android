@@ -1,0 +1,88 @@
+name: Build Android APK and optional signed release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Extract v5 Android project
+        shell: bash
+        run: |
+          unzip -q Ethiopia_Events_Android_Starter_v5.zip
+          test -f ethio-events-android/settings.gradle.kts
+          test -f ethio-events-android/app/src/main/java/et/events/mobile/MainActivity.kt
+          echo "PROJECT_DIR=$GITHUB_WORKSPACE/ethio-events-android" >> "$GITHUB_ENV"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Install Android SDK components
+        shell: bash
+        run: |
+          sdkmanager --install "platforms;android-37.0" "build-tools;36.0.0"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+          ln -sfn android-37.0 "$ANDROID_HOME/platforms/android-37"
+          test -f "$ANDROID_HOME/platforms/android-37/android.jar"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Build debug APK
+        run: gradle --no-daemon -p "$PROJECT_DIR" assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: events-v5-debug-apk
+          path: ethio-events-android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Configure release signing
+        id: release_signing
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && env.ANDROID_KEYSTORE_PASSWORD != '' && env.ANDROID_KEY_ALIAS != '' && env.ANDROID_KEY_PASSWORD != '' }}
+        shell: bash
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/events-upload-key.jks"
+          test -s "$RUNNER_TEMP/events-upload-key.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/events-upload-key.jks" >> "$GITHUB_ENV"
+
+      - name: Build signed release APK and App Bundle
+        if: ${{ steps.release_signing.outcome == 'success' }}
+        run: gradle --no-daemon -p "$PROJECT_DIR" assembleRelease bundleRelease
+
+      - name: Upload signed release outputs
+        if: ${{ steps.release_signing.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: events-v5-signed-release
+          path: |
+            ethio-events-android/app/build/outputs/apk/release/app-release.apk
+            ethio-events-android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
