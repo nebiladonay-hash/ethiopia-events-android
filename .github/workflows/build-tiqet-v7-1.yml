@@ -1,0 +1,91 @@
+name: Build Tiqet Android V7.1.1
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - v7.1-integration
+    paths:
+      - 'Tiqet_Android_V7_1.zip'
+      - '.github/workflows/build-tiqet-v7-1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compile V7.1.1 debug APK
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Extract V7.1.1 source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f Tiqet_Android_V7_1.zip
+          unzip -q Tiqet_Android_V7_1.zip -d "$RUNNER_TEMP/tiqet-v7"
+          PROJECT_DIR="$RUNNER_TEMP/tiqet-v7/tiqet-android"
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          test -f "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
+          test -f "$PROJECT_DIR/supabase/migrations/003_payment_review_and_refund_safety.sql"
+          test -f "$PROJECT_DIR/supabase/migrations/004_provider_balance_aware_payout_reserve.sql"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Install Android 37 platform and build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platforms;android-37" "build-tools;36.0.0"
+          test -f "$ANDROID_HOME/platforms/android-37/android.jar"
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Check public Supabase client configuration
+        shell: bash
+        run: |
+          if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_ANON_KEY" ]]; then
+            echo "::warning::Supabase repository variables are missing; the APK may compile but cannot connect to the hosted backend."
+          fi
+
+      - name: Assemble debug APK
+        run: gradle --no-daemon -p "$PROJECT_DIR" assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiqet-v7-1-1-debug-apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload backend source for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiqet-v7-1-1-supabase-backend
+          path: |
+            ${{ env.PROJECT_DIR }}/supabase/migrations/001_tiqet_core.sql
+            ${{ env.PROJECT_DIR }}/supabase/migrations/002_marketplace_monetization_and_cashout.sql
+            ${{ env.PROJECT_DIR }}/supabase/migrations/003_payment_review_and_refund_safety.sql
+            ${{ env.PROJECT_DIR }}/supabase/migrations/004_provider_balance_aware_payout_reserve.sql
+            ${{ env.PROJECT_DIR }}/supabase/functions/**
+            ${{ env.PROJECT_DIR }}/supabase/config.toml
+          if-no-files-found: error
