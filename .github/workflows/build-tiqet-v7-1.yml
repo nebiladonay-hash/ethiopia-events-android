@@ -10,6 +10,8 @@ on:
       - 'supabase/functions/**'
       - 'supabase/migrations/**'
       - 'patches/v7-2-payment-methods-*.patch'
+      - 'patches/v7-2-branding-ui.patch.gz.b64'
+      - 'branding/launcher-icons-small.zip.b64'
       - '.github/workflows/build-tiqet-v7-1.yml'
 
 permissions:
@@ -67,6 +69,27 @@ jobs:
           grep -q 'fun fetchChapaPaymentMethods' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
           grep -q 'PAY WITH' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
           echo "Payment-method selector patches applied."
+
+      - name: Apply Tiqet brand and UI refresh
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode "$GITHUB_WORKSPACE/patches/v7-2-branding-ui.patch.gz.b64" \
+            | gzip -dc \
+            | patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch
+          base64 --decode "$GITHUB_WORKSPACE/branding/launcher-icons-small.zip.b64" \
+            > "$RUNNER_TEMP/tiqet-launcher-icons.zip"
+          mkdir -p "$RUNNER_TEMP/tiqet-launcher-icons"
+          unzip -q "$RUNNER_TEMP/tiqet-launcher-icons.zip" -d "$RUNNER_TEMP/tiqet-launcher-icons"
+          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            icon="$RUNNER_TEMP/tiqet-launcher-icons/$density/ic_launcher.png"
+            test -s "$icon"
+            cp "$icon" "$PROJECT_DIR/app/src/main/res/mipmap-$density/ic_launcher.png"
+            cp "$icon" "$PROJECT_DIR/app/src/main/res/mipmap-$density/ic_launcher_round.png"
+          done
+          grep -q 'Discover. Connect. Enjoy.' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
+          grep -q 'fun TiqetBrandMark' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetBrand.kt"
+          echo "Tiqet V7.2 branding, app UI, adaptive icon layers and density icons are in place."
 
       - name: Overlay canonical deployed Edge Function source
         shell: bash
