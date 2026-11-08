@@ -49,6 +49,7 @@ jobs:
           test -s "$PROJECT_DIR/supabase/migrations/20261108133704_index_uncovered_foreign_keys.sql"
           test -s "$PROJECT_DIR/supabase/migrations/20261108133821_optimize_rls_auth_function_calls.sql"
           test -s "$PROJECT_DIR/supabase/migrations/20261108133852_merge_overlapping_public_read_policies.sql"
+          test -s "$PROJECT_DIR/supabase/migrations/20261108133955_split_anon_public_read_rls_policies.sql"
           echo "Incremental production migration source overlaid."
 
       - name: Apply reviewed Android payment-method patches
