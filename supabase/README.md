@@ -1,6 +1,6 @@
 # Tiqet Supabase backend
 
-This directory is the reviewed source-of-truth for Tiqet Edge Functions and the incremental production migrations committed from the connected Supabase project.
+This directory is the reviewed source-of-truth for Tiqet Edge Functions and incremental production migrations committed from the connected Supabase project.
 
 ## Production target
 
@@ -21,8 +21,9 @@ The existing Tiqet core schema was already present before this connected product
 - `20261108133704_index_uncovered_foreign_keys`
 - `20261108133821_optimize_rls_auth_function_calls`
 - `20261108133852_merge_overlapping_public_read_policies`
+- `20261108134159_split_anon_public_read_rls_policies`
 
-The remote schema contains 22 public tables; all observed public tables had RLS enabled. Four internal accounting/provider/webhook tables are service-role-only. The production migration history does **not** yet represent the older baseline schema files in the V7.1 archive. Do not run `supabase db push` from the archive until the baseline is reconciled. The GitHub backend workflow is currently a package/source verification workflow only and does not push schema changes.
+The remote schema contains 22 public tables; all observed public tables had RLS enabled. Internal accounting/provider/webhook tables are service-role-only. The production migration history does **not** yet represent the older baseline schema files in the V7.1 archive. Do not run `supabase db push` from the archive until the baseline is reconciled. The GitHub backend workflow is currently a package/source verification workflow only and does not push schema changes.
 
 ## Active Edge Functions
 
@@ -60,7 +61,7 @@ Supabase's standard Edge Function environment values (`SUPABASE_URL`, `SUPABASE_
 
 The existing single Tiqet Auth account was granted server-managed `app_metadata.tiqet_role=platform_owner`. Platform-owner Edge Functions check this non-user-editable Auth metadata before returning the platform revenue summary or accepting platform payout requests.
 
-## Payment safety
+## Payment and RLS safety
 
 - A client redirect is never treated as proof of payment.
 - The webhook verifies its HMAC signature and calls Chapa's server-side payment/payout verification before recording provider success.
@@ -68,13 +69,16 @@ The existing single Tiqet Auth account was granted server-managed `app_metadata.
 - Refund webhooks are placed into manual reconciliation. Partial/full refunds are not finalized until an operator records the provider-confirmed adjustment.
 - Payout requests are idempotent, reserve against the revenue ledger and a fresh Chapa available balance, and remain pending until a verified final provider status is received.
 - Live payment and live payout paths fail closed unless the approval flags are explicitly configured.
+- Anonymous/public event and ticket reads are isolated from authenticated organiser-owned draft reads; simulated `anon` and `authenticated` role queries passed after policy separation.
 
 ## Security and performance review
 
 - No public-table RLS-disabled findings.
-- The missing-FK-index lint was cleared by the incremental index migration.
-- The `auth.uid()` per-row policy evaluation and overlapping SELECT-policy warnings were cleared by the two RLS optimization migrations.
-- Remaining security advisor notices include internal RLS-protected tables with no anon/user policies (intentional), authenticated-only SECURITY DEFINER app RPCs that perform ownership checks, and leaked-password protection disabled in Auth. Review those before launch.
+- No remaining unindexed-FK lint.
+- No remaining `auth.uid()` per-row policy-initplan lint.
+- No remaining overlapping permissive SELECT-policy lint.
+- Remaining notices include internal RLS-protected tables with no anon/user policies (intentional), authenticated-only SECURITY DEFINER app RPCs that perform ownership checks, and leaked-password protection disabled in Auth.
+- Unused-index INFO findings are expected while the production database has almost no event/order/payment workload. Reassess after traffic exists.
 
 ## Current verification boundary
 
