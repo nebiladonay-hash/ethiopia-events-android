@@ -1,6 +1,6 @@
 # Tiqet Supabase backend
 
-This directory is the reviewed source-of-truth for the Tiqet Edge Functions. The active production functions were deployed through the connected Supabase project and their exact deployed source was synced into this repository.
+This directory is the reviewed source-of-truth for Tiqet Edge Functions and the incremental production migrations committed from the connected Supabase project.
 
 ## Production target
 
@@ -12,18 +12,21 @@ This directory is the reviewed source-of-truth for the Tiqet Edge Functions. The
 
 ## Remote database state
 
-The existing Tiqet core schema was already present before this connected production migration pass. The backend pass added and verified the following migration records in Supabase:
+The existing Tiqet core schema was already present before this connected production migration pass. The backend pass added and verified these migration records in Supabase:
 
 - `20261108131058_harden_public_rpc_execute_grants`
 - `20261108131548_payment_review_refund_safety`
 - `20261108131602_provider_balance_aware_payout_reserve`
 - `20261108131724_provider_agnostic_payment_core`
+- `20261108133704_index_uncovered_foreign_keys`
+- `20261108133821_optimize_rls_auth_function_calls`
+- `20261108133852_merge_overlapping_public_read_policies`
 
-The remote schema contains 22 public tables; all observed public tables had RLS enabled. Four tables that store internal accounting, provider, webhook, or reconciliation records are deliberately restricted to service-role operations. The production migration history does **not** yet represent the older baseline schema files in this package. Do not run `supabase db push` from this package until a proper baseline/reconciliation is prepared and reviewed. The GitHub backend workflow is currently a package/source verification workflow only and does not push schema changes.
+The remote schema contains 22 public tables; all observed public tables had RLS enabled. Four internal accounting/provider/webhook tables are service-role-only. The production migration history does **not** yet represent the older baseline schema files in the V7.1 archive. Do not run `supabase db push` from the archive until the baseline is reconciled. The GitHub backend workflow is currently a package/source verification workflow only and does not push schema changes.
 
 ## Active Edge Functions
 
-All nine functions were confirmed active after deployment:
+All nine functions were active at last verification:
 
 - `create-payment-intent`
 - `create-chapa-checkout`
@@ -39,7 +42,7 @@ All functions except the provider webhook require a valid user JWT. The Chapa we
 
 ## Provider activation
 
-Chapa is the only executable checkout adapter. Its registry entry has checkout/split/payout capabilities enabled in the database, but credentials and merchant permissions are separate prerequisites.
+Chapa is the only executable checkout adapter. Its registry entry has checkout/split/payout capabilities enabled in the database, but credentials and merchant permissions remain separate prerequisites.
 
 ArifPay, FenanPay, SantimPay, and YagoutPay remain `contract_required` and disabled. Their provider slots are not claims of completed integrations.
 
@@ -55,16 +58,23 @@ Configure these privately in Supabase Edge Function secrets before sandbox testi
 
 Supabase's standard Edge Function environment values (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) are platform-provided. Do not put private keys or the service-role key in the Android APK, repository variables, or source files.
 
-The existing single Tiqet owner Auth account was marked with server-managed `app_metadata.tiqet_role=platform_owner`; platform-owner Edge Functions check this non-user-editable claim through Auth before returning revenue or accepting a withdrawal request.
+The existing single Tiqet Auth account was granted server-managed `app_metadata.tiqet_role=platform_owner`. Platform-owner Edge Functions check this non-user-editable Auth metadata before returning the platform revenue summary or accepting platform payout requests.
 
 ## Payment safety
 
 - A client redirect is never treated as proof of payment.
 - The webhook verifies its HMAC signature and calls Chapa's server-side payment/payout verification before recording provider success.
-- Payment references, amount in minor units, and currency must match the stored order.
+- Payment reference, amount in minor units, and currency must match the stored order.
 - Refund webhooks are placed into manual reconciliation. Partial/full refunds are not finalized until an operator records the provider-confirmed adjustment.
-- Payout requests are idempotent, reserve against the revenue ledger and fresh Chapa available balance, and remain pending until a verified final provider status is received.
+- Payout requests are idempotent, reserve against the revenue ledger and a fresh Chapa available balance, and remain pending until a verified final provider status is received.
 - Live payment and live payout paths fail closed unless the approval flags are explicitly configured.
+
+## Security and performance review
+
+- No public-table RLS-disabled findings.
+- The missing-FK-index lint was cleared by the incremental index migration.
+- The `auth.uid()` per-row policy evaluation and overlapping SELECT-policy warnings were cleared by the two RLS optimization migrations.
+- Remaining security advisor notices include internal RLS-protected tables with no anon/user policies (intentional), authenticated-only SECURITY DEFINER app RPCs that perform ownership checks, and leaked-password protection disabled in Auth. Review those before launch.
 
 ## Current verification boundary
 
