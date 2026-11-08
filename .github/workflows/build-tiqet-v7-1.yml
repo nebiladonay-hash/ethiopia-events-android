@@ -1,4 +1,4 @@
-name: Build Tiqet Android V7.1.1
+name: Build Tiqet Android V7.2
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   build:
-    name: Compile V7.1.1 debug APK
+    name: Compile V7.2 debug APK
     runs-on: ubuntu-latest
     env:
       SUPABASE_URL: ${{ vars.SUPABASE_URL }}
@@ -24,7 +24,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Extract V7.1.1 source archive
+      - name: Extract V7.2 source archive
         shell: bash
         run: |
           set -euo pipefail
@@ -33,8 +33,9 @@ jobs:
           PROJECT_DIR="$RUNNER_TEMP/tiqet-v7/tiqet-android"
           test -f "$PROJECT_DIR/settings.gradle.kts"
           test -f "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
-          test -f "$PROJECT_DIR/supabase/migrations/003_payment_review_and_refund_safety.sql"
-          test -f "$PROJECT_DIR/supabase/migrations/004_provider_balance_aware_payout_reserve.sql"
+          test -f "$PROJECT_DIR/supabase/migrations/005_provider_agnostic_payment_core.sql"
+          test -f "$PROJECT_DIR/supabase/functions/create-payment-intent/index.ts"
+          test -f "$PROJECT_DIR/supabase/functions/payment-provider-catalog/index.ts"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Set up Java 17
@@ -48,12 +49,12 @@ jobs:
         with:
           packages: 'platform-tools'
 
-      - name: Install Android 37 platform and build tools
+      - name: Install Android 37.0 platform and build tools
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager --install "platforms;android-37" "build-tools;36.0.0"
-          test -f "$ANDROID_HOME/platforms/android-37/android.jar"
+          sdkmanager --install "platforms;android-37.0" "build-tools;37.0.0"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
 
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
@@ -73,19 +74,17 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: tiqet-v7-1-1-debug-apk
+          name: tiqet-v7-2-debug-apk
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      - name: Upload backend source for review
+      - name: Upload Supabase backend source for review
         uses: actions/upload-artifact@v4
         with:
-          name: tiqet-v7-1-1-supabase-backend
+          name: tiqet-v7-2-supabase-backend
           path: |
-            ${{ env.PROJECT_DIR }}/supabase/migrations/001_tiqet_core.sql
-            ${{ env.PROJECT_DIR }}/supabase/migrations/002_marketplace_monetization_and_cashout.sql
-            ${{ env.PROJECT_DIR }}/supabase/migrations/003_payment_review_and_refund_safety.sql
-            ${{ env.PROJECT_DIR }}/supabase/migrations/004_provider_balance_aware_payout_reserve.sql
+            ${{ env.PROJECT_DIR }}/supabase/migrations/**
             ${{ env.PROJECT_DIR }}/supabase/functions/**
             ${{ env.PROJECT_DIR }}/supabase/config.toml
+            ${{ env.PROJECT_DIR }}/V7_2_PAYMENT_CORE_CHANGELOG.md
           if-no-files-found: error
