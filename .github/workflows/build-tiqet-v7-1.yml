@@ -64,6 +64,7 @@ jobs:
             test -s "$PROJECT_DIR/supabase/functions/$function/index.ts"
           done
           test -s "$PROJECT_DIR/supabase/functions/_shared/provider-catalog.ts"
+          test -s "$PROJECT_DIR/supabase/functions/_shared/payment-provider.ts"
           echo "Canonical backend function sources overlaid from the reviewed repository files."
 
       - name: Set up Java 17
