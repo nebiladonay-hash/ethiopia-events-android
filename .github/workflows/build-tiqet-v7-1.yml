@@ -8,6 +8,7 @@ on:
     paths:
       - 'Tiqet_Android_V7_1.zip'
       - 'supabase/functions/**'
+      - 'patches/v7-2-payment-methods-*.patch'
       - '.github/workflows/build-tiqet-v7-1.yml'
 
 permissions:
@@ -37,6 +38,16 @@ jobs:
           test -f "$PROJECT_DIR/supabase/config.toml"
           test -f "$PROJECT_DIR/supabase/migrations/005_provider_agnostic_payment_core.sql"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Apply reviewed Android payment-method patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch < "$GITHUB_WORKSPACE/patches/v7-2-payment-methods-api.patch"
+          patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch < "$GITHUB_WORKSPACE/patches/v7-2-payment-methods-ui.patch"
+          grep -q 'fun fetchChapaPaymentMethods' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
+          grep -q 'PAY WITH' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
+          echo "Payment-method selector patches applied."
 
       - name: Overlay canonical deployed Edge Function source
         shell: bash
