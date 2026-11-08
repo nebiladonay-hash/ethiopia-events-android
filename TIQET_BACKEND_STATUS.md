@@ -4,13 +4,14 @@ Last verified against production: 2026-11-08.
 
 ## Implemented and deployed
 - PostgreSQL schema extension for provider registry, payment-attempt audit, organiser settlements, payout requests, refund review and platform reconciliation.
-- Eight production migration records, including function-permission hardening, payment-review/refund safety, provider-agnostic payment core, FK indexes and RLS optimizations.
+- Nine production migration records, including function-permission hardening, payment-review/refund safety, provider-agnostic payment core, FK indexes, RLS optimizations and webhook receipt table grant lockdown.
 - Nine active Supabase Edge Functions, with deployed source synchronized in `supabase/functions/`.
 - Chapa checkout, signed webhook verification, dynamic payment-method discovery, payout destination discovery, organiser subaccount setup and platform withdrawal endpoints.
 - Server-side platform-owner checks using non-user-editable Auth `app_metadata.tiqet_role`.
 - Android payment-method selection patch staged in `patches/` and applied by the V7.2 build workflow.
 - Public table RLS enabled throughout the 22-table public schema.
 - Simulated role tests confirmed the authenticated account sees only its own profile, while the anonymous role can query public event/ticket endpoints without access to profile or organiser-private tables.
+- Webhook receipt table now grants no privileges to `anon` or `authenticated`; `service_role` has only SELECT, INSERT and UPDATE, verified against PostgreSQL privilege checks.
 
 ## Latest advisor verification
 - No health lint findings.
