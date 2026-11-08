@@ -1,0 +1,101 @@
+--- tiqet-android/app/src/main/java/et/events/mobile/MainActivity.kt
++++ tiqet-android/app/src/main/java/et/events/mobile/MainActivity.kt
+@@ -670,8 +670,34 @@
+     var ticketCount by remember(event.id) { mutableStateOf(1) }
+     var bookingBusy by remember { mutableStateOf(false) }
+     var bookingError by remember { mutableStateOf("") }
++    var paymentMethods by remember(event.id) { mutableStateOf(emptyList<Pair<String, String>>()) }
++    var paymentMethodsLoading by remember(event.id) { mutableStateOf(false) }
++    var selectedPaymentMethod by remember(event.id) { mutableStateOf("") }
+     val scope = rememberCoroutineScope()
+     val context = LocalContext.current
++    LaunchedEffect(event.id, event.price, api) {
++        if (event.price > 0.0) {
++            paymentMethodsLoading = true
++            paymentMethods = try {
++                withContext(Dispatchers.IO) {
++                    val rows = api.fetchChapaPaymentMethods()
++                    (0 until rows.length()).mapNotNull { index ->
++                        val row = rows.optJSONObject(index) ?: return@mapNotNull null
++                        val slug = row.optString("slug")
++                        val name = row.optString("name", slug)
++                        if (slug.isBlank() || name.isBlank()) null else slug to name
++                    }
++                }
++            } catch (_: Exception) {
++                emptyList()
++            } finally {
++                paymentMethodsLoading = false
++            }
++        } else {
++            paymentMethods = emptyList()
++            selectedPaymentMethod = ""
++        }
++    }
+     Column(
+         modifier = Modifier
+             .fillMaxSize()
+@@ -720,6 +746,48 @@
+             Text("−", color = BrandRed, fontSize = 23.sp, modifier = Modifier.clickable { if (ticketCount > 1) ticketCount-- }.padding(horizontal = 10.dp))
+             Text(ticketCount.toString(), color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+             Text("+", color = BrandRed, fontSize = 23.sp, modifier = Modifier.clickable { if (ticketCount < 10) ticketCount++ }.padding(horizontal = 10.dp))
++        }
++        if (event.price > 0.0) {
++            Spacer(Modifier.height(15.dp))
++            Text("PAY WITH", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
++            Spacer(Modifier.height(7.dp))
++            when {
++                paymentMethodsLoading -> Text("Loading enabled payment methods…", color = Muted, fontSize = 11.sp)
++                paymentMethods.isNotEmpty() -> Row(
++                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
++                    horizontalArrangement = Arrangement.spacedBy(7.dp)
++                ) {
++                    val automaticSelected = selectedPaymentMethod.isBlank()
++                    Text(
++                        "Automatic",
++                        color = if (automaticSelected) BrandIvory else Muted,
++                        fontSize = 11.sp,
++                        fontWeight = FontWeight.SemiBold,
++                        modifier = Modifier
++                            .clip(RoundedCornerShape(30.dp))
++                            .background(if (automaticSelected) BrandRed else SoftIvory)
++                            .border(1.dp, if (automaticSelected) BrandRed else Hairline, RoundedCornerShape(30.dp))
++                            .clickable { selectedPaymentMethod = "" }
++                            .padding(horizontal = 13.dp, vertical = 9.dp)
++                    )
++                    paymentMethods.forEach { (slug, name) ->
++                        val selected = selectedPaymentMethod == slug
++                        Text(
++                            name,
++                            color = if (selected) BrandIvory else Muted,
++                            fontSize = 11.sp,
++                            fontWeight = FontWeight.SemiBold,
++                            modifier = Modifier
++                                .clip(RoundedCornerShape(30.dp))
++                                .background(if (selected) BrandRed else SoftIvory)
++                                .border(1.dp, if (selected) BrandRed else Hairline, RoundedCornerShape(30.dp))
++                                .clickable { selectedPaymentMethod = slug }
++                                .padding(horizontal = 13.dp, vertical = 9.dp)
++                        )
++                    }
++                }
++                else -> Text("Available payment methods will appear on the secure Chapa checkout page.", color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
++            }
+         }
+         Spacer(Modifier.weight(1f))
+         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+@@ -745,7 +813,13 @@
+                                     withContext(Dispatchers.IO) { api.claimFreeTickets(ticketTypeId, ticketCount) }
+                                     bookingError = "Free tickets issued. Open the Tickets tab to view your QR code."
+                                 } else {
+-                                    val checkout = withContext(Dispatchers.IO) { api.createChapaCheckout(ticketTypeId, ticketCount) }
++                                    val checkout = withContext(Dispatchers.IO) {
++                                        api.createChapaCheckout(
++                                            ticketTypeId,
++                                            ticketCount,
++                                            selectedPaymentMethod.takeIf { it.isNotBlank() }
++                                        )
++                                    }
+                                     val url = checkout.optString("checkout_url")
+                                     if (url.isBlank()) throw IllegalStateException("Payment provider did not return a checkout link.")
+                                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
