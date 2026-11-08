@@ -27,9 +27,14 @@ jobs:
           test -f "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
           test -f "$PROJECT_DIR/supabase/config.toml"
           test -f "$PROJECT_DIR/supabase/migrations/005_provider_agnostic_payment_core.sql"
-          for function in             create-chapa-checkout chapa-webhook chapa-payment-methods             chapa-payout-banks create-chapa-organizer-subaccount             create-platform-payout platform-revenue-summary             create-payment-intent payment-provider-catalog; do
-            test -f "supabase/functions/$function/index.ts"
+          for function in \
+            create-chapa-checkout chapa-webhook chapa-payment-methods \
+            chapa-payout-banks create-chapa-organizer-subaccount \
+            create-platform-payout platform-revenue-summary \
+            create-payment-intent payment-provider-catalog; do
+            test -s "$PROJECT_DIR/supabase/functions/$function/index.ts"
           done
+          test -s "$PROJECT_DIR/supabase/functions/_shared/provider-catalog.ts"
+          test -s "$PROJECT_DIR/supabase/functions/_shared/payment-provider.ts"
           echo "Package verification passed."
           echo "This workflow does not apply migrations, deploy functions, or alter production."
-
