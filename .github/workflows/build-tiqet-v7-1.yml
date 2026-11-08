@@ -8,6 +8,7 @@ on:
     paths:
       - 'Tiqet_Android_V7_1.zip'
       - 'supabase/functions/**'
+      - 'supabase/migrations/**'
       - 'patches/v7-2-payment-methods-*.patch'
       - '.github/workflows/build-tiqet-v7-1.yml'
 
@@ -38,6 +39,17 @@ jobs:
           test -f "$PROJECT_DIR/supabase/config.toml"
           test -f "$PROJECT_DIR/supabase/migrations/005_provider_agnostic_payment_core.sql"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Overlay committed production migration source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d supabase/migrations
+          cp -R supabase/migrations/. "$PROJECT_DIR/supabase/migrations/"
+          test -s "$PROJECT_DIR/supabase/migrations/20261108133704_index_uncovered_foreign_keys.sql"
+          test -s "$PROJECT_DIR/supabase/migrations/20261108133821_optimize_rls_auth_function_calls.sql"
+          test -s "$PROJECT_DIR/supabase/migrations/20261108133852_merge_overlapping_public_read_policies.sql"
+          echo "Incremental production migration source overlaid."
 
       - name: Apply reviewed Android payment-method patches
         shell: bash
