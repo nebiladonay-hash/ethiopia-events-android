@@ -9,9 +9,8 @@ on:
       - 'Tiqet_Android_V7_1.zip'
       - 'supabase/functions/**'
       - 'supabase/migrations/**'
-      - 'patches/v7-2-payment-methods-*.patch'
-      - 'patches/v7-2-branding-ui.patch.gz.b64'
-      - 'branding/launcher-icons-small.zip.b64'
+      - 'patches/v7-2-payment-methods-api.patch'
+      - 'patches/v7-2-minimal-ui.patch.gz.b64'
       - '.github/workflows/build-tiqet-v7-1.yml'
 
 permissions:
@@ -60,36 +59,33 @@ jobs:
           test ! -e "$PROJECT_DIR/supabase/migrations/20261108133955_split_anon_public_read_rls_policies.sql"
           echo "All committed production migrations overlaid with history-aligned filenames."
 
-      - name: Apply reviewed Android payment-method patches
+      - name: Apply reviewed Android payment-method API patch
         shell: bash
         run: |
           set -euo pipefail
           patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch < "$GITHUB_WORKSPACE/patches/v7-2-payment-methods-api.patch"
-          patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch < "$GITHUB_WORKSPACE/patches/v7-2-payment-methods-ui.patch"
           grep -q 'fun fetchChapaPaymentMethods' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
-          grep -q 'PAY WITH' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
-          echo "Payment-method selector patches applied."
+          echo "Payment-method API patch applied."
 
-      - name: Apply Tiqet brand and UI refresh
+      - name: Apply approved minimalist Tiqet branding and full UI refresh
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode "$GITHUB_WORKSPACE/patches/v7-2-branding-ui.patch.gz.b64" \
+          base64 --decode "$GITHUB_WORKSPACE/patches/v7-2-minimal-ui.patch.gz.b64" \
             | gzip -dc \
             | patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch
-          base64 --decode "$GITHUB_WORKSPACE/branding/launcher-icons-small.zip.b64" \
-            > "$RUNNER_TEMP/tiqet-launcher-icons.zip"
-          mkdir -p "$RUNNER_TEMP/tiqet-launcher-icons"
-          unzip -q "$RUNNER_TEMP/tiqet-launcher-icons.zip" -d "$RUNNER_TEMP/tiqet-launcher-icons"
+          # Vector launcher resources replace the old raster icons, preventing Android from selecting stale density-specific bitmaps.
           for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-            icon="$RUNNER_TEMP/tiqet-launcher-icons/$density/ic_launcher.png"
-            test -s "$icon"
-            cp "$icon" "$PROJECT_DIR/app/src/main/res/mipmap-$density/ic_launcher.png"
-            cp "$icon" "$PROJECT_DIR/app/src/main/res/mipmap-$density/ic_launcher_round.png"
+            rm -f "$PROJECT_DIR/app/src/main/res/mipmap-$density/ic_launcher.png"
+            rm -f "$PROJECT_DIR/app/src/main/res/mipmap-$density/ic_launcher_round.png"
           done
+          test -s "$PROJECT_DIR/app/src/main/res/mipmap-anydpi/ic_launcher.xml"
+          test -s "$PROJECT_DIR/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml"
+          grep -q 'TiqetLogoLockup' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
           grep -q 'Discover. Connect. Enjoy.' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
           grep -q 'fun TiqetBrandMark' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetBrand.kt"
-          echo "Tiqet V7.2 branding, app UI, adaptive icon layers and density icons are in place."
+          grep -q 'PAYMENT METHOD' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
+          echo "Tiqet V7.2 minimalist logo lockup, vector launcher mark, and refreshed app UI applied."
 
       - name: Overlay canonical deployed Edge Function source
         shell: bash
