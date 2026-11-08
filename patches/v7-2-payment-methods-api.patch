@@ -1,0 +1,19 @@
+--- tiqet-android/app/src/main/java/et/events/mobile/backend/TiqetApi.kt
++++ tiqet-android/app/src/main/java/et/events/mobile/backend/TiqetApi.kt
+@@ -323,8 +323,14 @@
+     }
+ 
+     // Backwards-compatible wrapper for current checkout screens.
+-    fun createChapaCheckout(ticketTypeId: String, quantity: Int): JSONObject =
+-        createPaymentIntent(ticketTypeId, quantity, provider = "chapa")
++    fun createChapaCheckout(ticketTypeId: String, quantity: Int, paymentMethod: String? = null): JSONObject =
++        createPaymentIntent(ticketTypeId, quantity, provider = "chapa", paymentMethod = paymentMethod)
++
++    fun fetchChapaPaymentMethods(): JSONArray {
++        requireSignedIn()
++        return request("GET", "/functions/v1/chapa-payment-methods", useSession = true)
++            .optJSONArray("methods") ?: JSONArray()
++    }
+ 
+     fun fetchPaymentProviderCatalog(): JSONObject {
+         requireSignedIn()
