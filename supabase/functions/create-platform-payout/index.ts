@@ -12,10 +12,9 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
   const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) return json({ error: 'Sign-in required' }, 401)
-  const ownerId = Deno.env.get('TIQET_OWNER_USER_ID')
   const chapaKey = Deno.env.get('CHAPA_PRIVATE_KEY')
   const chapaMode = Deno.env.get('CHAPA_MODE')?.toLowerCase()
-  if (!ownerId || !chapaKey || !['test', 'live'].includes(chapaMode ?? '')) return json({ error: 'Configure TIQET_OWNER_USER_ID, CHAPA_PRIVATE_KEY and CHAPA_MODE (test or live)' }, 503)
+  if (!chapaKey || !['test', 'live'].includes(chapaMode ?? '')) return json({ error: 'Configure CHAPA_PRIVATE_KEY and CHAPA_MODE (test or live) in Supabase Edge Function secrets' }, 503)
   if (chapaMode === 'live' && Deno.env.get('TIQET_LIVE_PAYOUTS_ENABLED') !== 'true') {
     return json({ error: 'Live platform withdrawals are locked until Tiqet and Chapa have approved the marketplace payout flow.' }, 403)
   }
@@ -26,7 +25,7 @@ Deno.serve(async (req) => {
   const admin = createClient(url, service, { auth: { persistSession: false } })
   const { data: auth, error: authError } = await userClient.auth.getUser()
   if (authError || !auth.user) return json({ error: 'Invalid or expired session' }, 401)
-  if (auth.user.id !== ownerId) return json({ error: 'Only the Tiqet account owner can withdraw platform revenue' }, 403)
+  if (auth.user.app_metadata?.tiqet_role !== 'platform_owner') return json({ error: 'Platform-owner access required' }, 403)
   let body: { amount_etb?: number; bank_slug?: string; bank_name?: string; account_name?: string; account_number?: string }
   try { body = await req.json() } catch { return json({ error: 'Invalid JSON body' }, 400) }
   const amount = Number(body.amount_etb)
@@ -43,9 +42,8 @@ Deno.serve(async (req) => {
   const banksJson = await banksResponse.json().catch(() => ({}))
   const bank = Array.isArray(banksJson?.data) ? banksJson.data.find((b: Record<string, any>) => b.bank_slug === bankSlug && b.is_active === true) : null
   if (!banksResponse.ok || !bank) return json({ error: 'That payout destination is not currently enabled by Chapa' }, 400)
-  const currencyRules = bank.supported_currencies?.ETB
-  const min = Number(bank.min_amount ?? currencyRules?.default_min ?? 100)
-  const max = Number(bank.max_amount ?? currencyRules?.default_max ?? 100000000)
+  const min = Number(bank.min_amount ?? 100)
+  const max = Number(bank.max_amount ?? 100000000)
   if (amountMinor < min || amountMinor > max) return json({ error: `This destination supports withdrawals between ETB ${(min/100).toFixed(2)} and ETB ${(max/100).toFixed(2)}` }, 400)
 
   const balanceResponse = await fetch('https://api.chapa.global/v2/balances?currency=ETB', { headers: { Authorization: `Bearer ${chapaKey}` } })
