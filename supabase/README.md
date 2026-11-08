@@ -22,6 +22,7 @@ The existing Tiqet core schema was already present before this connected product
 - `20261108133821_optimize_rls_auth_function_calls`
 - `20261108133852_merge_overlapping_public_read_policies`
 - `20261108134159_split_anon_public_read_rls_policies`
+- `20261108141944_lock_down_webhook_event_table_grants`
 
 The remote schema contains 22 public tables; all observed public tables had RLS enabled. Internal accounting/provider/webhook tables are service-role-only. The production migration history does **not** yet represent the older baseline schema files in the V7.1 archive. Do not run `supabase db push` from the archive until the baseline is reconciled. The GitHub backend workflow is currently a package/source verification workflow only and does not push schema changes.
 
@@ -83,3 +84,21 @@ The existing single Tiqet Auth account was granted server-managed `app_metadata.
 ## Current verification boundary
 
 Database migrations and Edge Function deployments were verified. No Chapa sandbox transaction, actual payout, live payment, refund, or live provider settlement has been performed in this pass. The next required step is configuring sandbox credentials privately and running end-to-end sandbox tests.
+
+
+## Direct verification — 8 November 2026
+
+The Supabase connector was used to inspect the live project after the latest deployments:
+
+- Project status: `ACTIVE_HEALTHY` (PostgreSQL 17.11).
+- Remote migration history: 9 entries, including the webhook-grants migration listed above.
+- Edge Functions: all nine expected functions are `ACTIVE`; JWT verification is enabled for all except `chapa-webhook`, which validates the provider HMAC signature itself.
+- Public tables inspected: all 22 have RLS enabled.
+- Internal payment/accounting/webhook tables have no anon/authenticated table grants; they are service-role-only. No-policy advisor notices on these tables are intentional deny-by-default protections.
+- Payment provider registry: Chapa is the only enabled executable adapter; ArifPay, FenanPay, SantimPay and YagoutPay are disabled with `contract_required` state.
+- Current test database has one profile and no organisations, events, ticket types, orders, payments, tickets, provider accounts, settlement entries or payout requests.
+- Platform revenue summary RPC returned ETB 0.00 available, as expected for an empty test/production database.
+
+Security advisor notices remain for authenticated-only SECURITY DEFINER RPCs. Their current definitions check `auth.uid()` and apply event/organisation ownership or staff assignment checks before accessing protected rows. They were retained because these RPCs perform transactional writes that the clients cannot perform directly under table grants and RLS. Leaked-password protection remains disabled in Auth and should be enabled in Authentication → Settings → Password Security; it is a project setting and was not changed by SQL.
+
+No customer payment, payout, refund, or provider settlement has been performed. Chapa credentials and merchant approval still need to be confirmed before sandbox/live payment testing.
