@@ -12,8 +12,6 @@ Deno.serve(async (req) => {
   if (req.method !== 'GET') return json({ error: 'Method not allowed' }, 405)
   const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) return json({ error: 'Sign-in required' }, 401)
-  const ownerId = Deno.env.get('TIQET_OWNER_USER_ID')
-  if (!ownerId) return json({ error: 'Owner dashboard is not configured' }, 503)
   const url = Deno.env.get('SUPABASE_URL')!
   const anon = Deno.env.get('SUPABASE_ANON_KEY')!
   const service = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -21,7 +19,7 @@ Deno.serve(async (req) => {
   const admin = createClient(url, service, { auth: { persistSession: false } })
   const { data: auth, error } = await userClient.auth.getUser()
   if (error || !auth.user) return json({ error: 'Invalid or expired session' }, 401)
-  if (auth.user.id !== ownerId) return json({ is_owner: false }, 403)
+  if (auth.user.app_metadata?.tiqet_role !== 'platform_owner') return json({ error: 'Platform-owner access required' }, 403)
   const { data: summary, error: summaryError } = await admin.rpc('get_tiqet_platform_revenue_summary')
   if (summaryError || !summary) return json({ error: 'Could not read Tiqet revenue ledger' }, 500)
   return json({
