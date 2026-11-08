@@ -4,12 +4,13 @@ Last verified against production: 2026-11-08.
 
 ## Implemented and deployed
 - PostgreSQL schema extension for provider registry, payment-attempt audit, organiser settlements, payout requests, refund review and platform reconciliation.
-- Seven production migration records, including function-permission hardening, payment-review/refund safety, provider-agnostic payment core, FK indexes and RLS policy optimizations.
-- Nine active Supabase Edge Functions, with the exact deployed source synchronized in `supabase/functions/`.
+- Eight production migration records, including function-permission hardening, payment-review/refund safety, provider-agnostic payment core, FK indexes and RLS optimizations.
+- Nine active Supabase Edge Functions, with deployed source synchronized in `supabase/functions/`.
 - Chapa checkout, signed webhook verification, dynamic payment-method discovery, payout destination discovery, organiser subaccount setup and platform withdrawal endpoints.
 - Server-side platform-owner checks using non-user-editable Auth `app_metadata.tiqet_role`.
 - Android payment-method selection patch staged in `patches/` and applied by the V7.2 build workflow.
 - Public table RLS enabled throughout the 22-table public schema.
+- Simulated role tests confirmed the authenticated account sees only its own profile, while the anonymous role can query public event/ticket endpoints without access to profile or organiser-private tables.
 
 ## Latest advisor verification
 - No health lint findings.
@@ -17,7 +18,7 @@ Last verified against production: 2026-11-08.
 - No remaining RLS auth-initplan lint.
 - No remaining multiple-permissive-policy lint.
 - Remaining notices: 12 internal tables have RLS with no anon/user policy (intentional service-role isolation); 8 authenticated SECURITY DEFINER RPC warnings (user-scoped operations with ownership checks); leaked-password protection is disabled in Supabase Auth.
-- 39 unused-index INFO findings are expected while the production database has no events/orders/payment workload yet. Reassess after traffic exists.
+- 38 unused-index INFO findings are expected while the production database has no event/order/payment workload. Reassess after traffic exists.
 
 ## Not production-certified
 - Chapa private key/webhook secret and sandbox mode were not confirmed by the connected project tools.
