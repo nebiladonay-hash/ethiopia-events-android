@@ -20,8 +20,8 @@ jobs:
     name: Compile V7.2 debug APK and package backend source
     runs-on: ubuntu-latest
     env:
-      SUPABASE_URL: ${{ vars.SUPABASE_URL }}
-      SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+      SUPABASE_URL: "https://ebrrdmxyoioefoprtict.supabase.co"
+      SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVicnJkbXh5b2lvZWZvcHJ0aWN0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQwMzA2NzMsImV4cCI6MjEwOTYwNjY3M30.Av8tI5byGaTVSkePdt6BsU4qdfXXij2f8Tg9vUbWfNo"
 
     steps:
       - name: Check out Tiqet integration source
@@ -105,12 +105,13 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Check public Supabase client configuration
+      - name: Verify TIqet public client configuration
         shell: bash
         run: |
-          if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_ANON_KEY" ]]; then
-            echo "::warning::Set repository variables SUPABASE_URL and SUPABASE_ANON_KEY to connect the Android APK to TIqet-production."
-          fi
+          set -euo pipefail
+          test "$SUPABASE_URL" = "https://ebrrdmxyoioefoprtict.supabase.co"
+          test -n "$SUPABASE_ANON_KEY"
+          echo "Android build targets TIqet-production with its public anon key."
 
       - name: Assemble debug APK
         run: gradle --no-daemon -p "$PROJECT_DIR" assembleDebug
