@@ -50,23 +50,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          cd "$PROJECT_DIR"
+          supabase link --project-ref "$SUPABASE_PROJECT_REF"
 
       - name: Show remote migration status
         shell: bash
         run: |
           set -euo pipefail
+          cd "$PROJECT_DIR"
           supabase migration list --remote
           echo
           echo "Dry-run only: this step does not change the database."
-          supabase db push --dry-run --remote
+          supabase db push --dry-run --remote="$SUPABASE_PROJECT_REF"
 
       - name: Apply pending database migrations
         if: ${{ inputs.mode == 'deploy' }}
         shell: bash
         run: |
           set -euo pipefail
-          supabase db push --remote --yes
+          cd "$PROJECT_DIR"
+          supabase db push --remote="$SUPABASE_PROJECT_REF" --yes
 
       - name: Deploy Tiqet Edge Functions
         if: ${{ inputs.mode == 'deploy' }}
