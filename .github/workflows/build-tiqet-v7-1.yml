@@ -46,11 +46,17 @@ jobs:
           set -euo pipefail
           test -d supabase/migrations
           cp -R supabase/migrations/. "$PROJECT_DIR/supabase/migrations/"
-          test -s "$PROJECT_DIR/supabase/migrations/20261108133704_index_uncovered_foreign_keys.sql"
-          test -s "$PROJECT_DIR/supabase/migrations/20261108133821_optimize_rls_auth_function_calls.sql"
-          test -s "$PROJECT_DIR/supabase/migrations/20261108133852_merge_overlapping_public_read_policies.sql"
-          test -s "$PROJECT_DIR/supabase/migrations/20261108133955_split_anon_public_read_rls_policies.sql"
-          echo "Incremental production migration source overlaid."
+          for migration in \
+            20261108131058_harden_public_rpc_execute_grants.sql \
+            20261108133704_index_uncovered_foreign_keys.sql \
+            20261108133821_optimize_rls_auth_function_calls.sql \
+            20261108133852_merge_overlapping_public_read_policies.sql \
+            20261108134159_split_anon_public_read_rls_policies.sql \
+            20261108141944_lock_down_webhook_event_table_grants.sql; do
+            test -s "$PROJECT_DIR/supabase/migrations/$migration"
+          done
+          test ! -e "$PROJECT_DIR/supabase/migrations/20261108133955_split_anon_public_read_rls_policies.sql"
+          echo "All committed production migrations overlaid with history-aligned filenames."
 
       - name: Apply reviewed Android payment-method patches
         shell: bash
