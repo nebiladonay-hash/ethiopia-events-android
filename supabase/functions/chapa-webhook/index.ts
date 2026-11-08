@@ -144,15 +144,24 @@ Deno.serve(async (req) => {
         p_order_id: payment.order_id, p_reason: String(event.status),
       })
       if (failError) return json({ error: 'Could not persist failed payment state' }, 500)
-      const { error: failedAttemptEventError } = await admin.from('payment_attempt_events').insert({
+      const failedPayloadHash = await sha256(rawBytes)
+      const { error: failedAttemptEventError } = await admin.from('payment_attempt_events').upsert({
         payment_id: payment.id, order_id: payment.order_id, provider: 'chapa', event_type: 'payment_failed',
         provider_event_reference: chapaReference || merchantReference,
+        payload_digest: failedPayloadHash,
         safe_metadata: { provider_status: String(event.status), source: 'signed_webhook' },
-      })
-      if (failedAttemptEventError) console.error('Could not persist failed-payment audit event', failedAttemptEventError.message)
-      await admin.from('payments').update({
+      }, { onConflict: 'provider,payload_digest', ignoreDuplicates: true })
+      if (failedAttemptEventError) {
+        console.error('Could not persist failed-payment audit event', failedAttemptEventError.message)
+        return json({ error: 'Could not persist failed payment audit record' }, 500)
+      }
+      const { error: failureMetadataError } = await admin.from('payments').update({
         failure_code: String(event.status), failure_message: 'Provider reported payment failure or cancellation.',
       }).eq('id', payment.id)
+      if (failureMetadataError) {
+        console.error('Could not persist failed-payment details', failureMetadataError.message)
+        return json({ error: 'Could not persist failed payment details' }, 500)
+      }
     }
     return json({ received: true, verified: false })
   }
