@@ -12,6 +12,7 @@ on:
       - 'patches/v7-2-payment-methods-api.patch'
       - 'patches/v7-2-minimal-ui.patch.gz.b64'
       - 'patches/v7-2-wave-ui.patch.gz.b64'
+      - 'patches/v7-2-wave-finish.patch.gz.b64'
       - '.github/workflows/build-tiqet-v7-1.yml'
 
 permissions:
@@ -99,6 +100,19 @@ jobs:
           grep -q 'TiqetWaveHeader' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
           grep -q 'android:scaleX="0.82"' "$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_foreground.xml"
           echo "Full-width red wave headers and the smaller adaptive launcher mark are in place."
+
+      - name: Apply final Tiqet palette, zigzag ribbon, event header and launcher refinement
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode "$GITHUB_WORKSPACE/patches/v7-2-wave-finish.patch.gz.b64" \
+            | gzip -dc \
+            | patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch
+          grep -q 'val zigzag = Path()' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetBrand.kt"
+          grep -q 'title = event.title' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
+          grep -q 'android:scaleX="0.78"' "$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_foreground.xml"
+          grep -q 'android:startColor="#5A071F"' "$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_background.xml"
+          echo "Tiqet red zigzag identity, warm ivory screens, event detail wave header and smaller launcher mark applied."
 
       - name: Overlay canonical deployed Edge Function source
         shell: bash
