@@ -117,13 +117,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode "$GITHUB_WORKSPACE/patches/v7-2-launcher-scale-only.patch.gz.b64" \
-            | gzip -dc \
-            | patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch
-          grep -q 'android:scaleX="0.72" android:scaleY="0.72"' "$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_foreground.xml"
-          grep -q 'M34,39 H74 V48 H59 V70 H49 V48 H34 Z' "$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_foreground.xml"
-          grep -q 'android:fillColor="#72001C"' "$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_background.xml"
-          echo "Previous approved launcher artwork and solid background restored; artwork alone reduced to 72% scale."
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path("$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_foreground.xml")
+          s = p.read_text()
+          # Preserve the approved vector artwork. Only reduce its group scale.
+          signature = 'M34,39 H74 V48 H59 V70 H49 V48 H34 Z'
+          if signature not in s:
+              raise SystemExit("Approved previous launcher artwork signature not found; refusing to alter a different logo.")
+          s2, nx = re.subn(r'android:scaleX="[^"]+"', 'android:scaleX="0.72"', s, count=1)
+          s3, ny = re.subn(r'android:scaleY="[^"]+"', 'android:scaleY="0.72"', s2, count=1)
+          if nx != 1 or ny != 1:
+              raise SystemExit("Could not identify the launcher artwork scale attributes.")
+          p.write_text(s3)
+          assert signature in p.read_text()
+          assert 'android:scaleX="0.72"' in p.read_text()
+          assert 'android:scaleY="0.72"' in p.read_text()
+          bg = Path("$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_background.xml").read_text()
+          if '#72001C' not in bg:
+              raise SystemExit("Previous solid burgundy launcher background was not preserved.")
+          print("Previous approved launcher artwork/background retained; only scale reduced to 72%.")
+          PY
 
       - name: Overlay canonical deployed Edge Function source
         shell: bash
