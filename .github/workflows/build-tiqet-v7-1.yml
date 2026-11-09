@@ -11,6 +11,7 @@ on:
       - 'supabase/migrations/**'
       - 'patches/v7-2-payment-methods-api.patch'
       - 'patches/v7-2-minimal-ui.patch.gz.b64'
+      - 'patches/v7-2-wave-ui.patch.gz.b64'
       - '.github/workflows/build-tiqet-v7-1.yml'
 
 permissions:
@@ -86,6 +87,18 @@ jobs:
           grep -q 'fun TiqetBrandMark' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetBrand.kt"
           grep -q 'PAYMENT METHOD' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
           echo "Tiqet V7.2 minimalist logo lockup, vector launcher mark, and refreshed app UI applied."
+
+      - name: Apply Tiqet red wave visual system and adaptive icon spacing
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode "$GITHUB_WORKSPACE/patches/v7-2-wave-ui.patch.gz.b64" \
+            | gzip -dc \
+            | patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch
+          grep -q 'fun TiqetWaveHeader' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetBrand.kt"
+          grep -q 'TiqetWaveHeader' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
+          grep -q 'android:scaleX="0.82"' "$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_foreground.xml"
+          echo "Full-width red wave headers and the smaller adaptive launcher mark are in place."
 
       - name: Overlay canonical deployed Edge Function source
         shell: bash
