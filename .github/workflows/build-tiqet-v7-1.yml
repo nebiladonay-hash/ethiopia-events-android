@@ -113,38 +113,76 @@ jobs:
           grep -q 'title = event.title' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
           echo "Tiqet red zigzag identity, warm ivory screens and event detail wave header applied."
 
-      - name: Preserve existing Tiqet launcher artwork and shrink it only
+      - name: Restore the previous Tiqet launcher artwork and shrink only
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import os, re
+          import os
+
           root = Path(os.environ["PROJECT_DIR"])
-          targets = [
-              root / "app/src/main/res/drawable/ic_launcher_foreground.xml",
-              root / "app/src/main/res/drawable/ic_launcher_monochrome.xml",
-              root / "app/src/main/res/mipmap-anydpi/ic_launcher.xml",
-              root / "app/src/main/res/mipmap-anydpi/ic_launcher_round.xml",
-          ]
-          for p in targets:
-              if not p.is_file():
-                  raise SystemExit(f"Missing launcher vector: {p}")
-              original = p.read_text()
-              match = re.search(r'<group\b[^>]*>', original)
-              if not match:
-                  raise SystemExit(f"No artwork group found in {p}")
-              tag = match.group(0)
-              tag2, nx = re.subn(r'android:scaleX="[^"]+"', 'android:scaleX="0.72"', tag, count=1)
-              tag3, ny = re.subn(r'android:scaleY="[^"]+"', 'android:scaleY="0.72"', tag2, count=1)
-              if nx != 1 or ny != 1:
-                  raise SystemExit(f"Expected existing scale attributes in {p}; refusing to redraw artwork.")
-              updated = original[:match.start()] + tag3 + original[match.end():]
-              p.write_text(updated)
-              # Assert that geometry, fills, ticket shape and background remain unchanged.
-              assert p.read_text().count('android:scaleX="0.72"') == 1
-              assert p.read_text().count('android:scaleY="0.72"') == 1
-          print("Existing Tiqet launcher artwork, colours and backgrounds preserved; only vector-group scale set to 72%.")
+          res = root / "app/src/main/res"
+          scale = 'android:scaleX="0.72" android:scaleY="0.72"'
+
+          foreground = """<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+              <group android:pivotX="54" android:pivotY="54" android:rotation="-8" SCALE>
+                  <path android:fillColor="#FAF8F4" android:pathData="M28,31 H80 Q87,31 87,38 V40 C77,45 77,57 87,62 V70 Q87,77 80,77 H28 Q21,77 21,70 V62 C31,57 31,45 21,40 V38 Q21,31 28,31 Z" />
+                  <path android:fillColor="#76001F" android:pathData="M34,39 H74 V48 H59 V70 H49 V48 H34 Z" />
+              </group>
+          </vector>
+          """.replace("SCALE", scale)
+
+          background = """<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#72001C" android:pathData="M0,0h108v108h-108z" />
+          </vector>
+          """
+
+          monochrome = """<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+              <group android:pivotX="54" android:pivotY="54" android:rotation="-8" SCALE>
+                  <path android:fillColor="#FFFFFFFF" android:pathData="M28,31 H80 Q87,31 87,38 V40 C77,45 77,57 87,62 V70 Q87,77 80,77 H28 Q21,77 21,70 V62 C31,57 31,45 21,40 V38 Q21,31 28,31 Z" />
+                  <path android:fillColor="#FF000000" android:pathData="M34,39 H74 V48 H59 V70 H49 V48 H34 Z" />
+              </group>
+          </vector>
+          """.replace("SCALE", scale)
+
+          legacy = """<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#72001C" android:pathData="M0,0h108v108h-108z" />
+              <group android:pivotX="54" android:pivotY="54" android:rotation="-8" SCALE>
+                  <path android:fillColor="#FAF8F4" android:pathData="M28,31 H80 Q87,31 87,38 V40 C77,45 77,57 87,62 V70 Q87,77 80,77 H28 Q21,77 21,70 V62 C31,57 31,45 21,40 V38 Q21,31 28,31 Z" />
+                  <path android:fillColor="#76001F" android:pathData="M34,39 H74 V48 H59 V70 H49 V48 H34 Z" />
+              </group>
+          </vector>
+          """.replace("SCALE", scale)
+
+          files = {
+              "drawable/ic_launcher_foreground.xml": foreground,
+              "drawable/ic_launcher_background.xml": background,
+              "drawable/ic_launcher_monochrome.xml": monochrome,
+              "mipmap-anydpi/ic_launcher.xml": legacy,
+              "mipmap-anydpi/ic_launcher_round.xml": legacy,
+          }
+          for relative, content in files.items():
+              target = res / relative
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(content)
+
+          # Adaptive resources continue to reference these exact layers; do not redraw them.
+          for relative in ("mipmap-anydpi-v26/ic_launcher.xml", "mipmap-anydpi-v26/ic_launcher_round.xml"):
+              target = res / relative
+              if not target.is_file():
+                  raise SystemExit(f"Missing adaptive icon declaration: {target}")
+              data = target.read_text()
+              if '@drawable/ic_launcher_foreground' not in data or '@drawable/ic_launcher_background' not in data:
+                  raise SystemExit(f"Unexpected adaptive icon references in {target}")
+
+          # Guard the previous ticket/T geometry, brand colours, solid background and exact 72% scale.
+          fg = (res / "drawable/ic_launcher_foreground.xml").read_text()
+          assert 'M34,39 H74 V48 H59 V70 H49 V48 H34 Z' in fg
+          assert '#FAF8F4' in fg and '#76001F' in fg
+          assert 'android:rotation="-8" android:scaleX="0.72" android:scaleY="0.72"' in fg
+          assert '#72001C' in (res / "drawable/ic_launcher_background.xml").read_text()
+          print("Exact previous cream-ticket/burgundy-T launcher restored; only artwork scale reduced to 72%.")
           PY
 
       - name: Overlay canonical deployed Edge Function source
