@@ -131,7 +131,7 @@ jobs:
               if not p.is_file():
                   raise SystemExit(f"Missing launcher vector: {p}")
               original = p.read_text()
-              match = re.search(r'<group\\b[^>]*>', original)
+              match = re.search(r'<group\b[^>]*>', original)
               if not match:
                   raise SystemExit(f"No artwork group found in {p}")
               tag = match.group(0)
