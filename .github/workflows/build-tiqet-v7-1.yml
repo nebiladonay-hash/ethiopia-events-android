@@ -113,7 +113,7 @@ jobs:
           grep -q 'title = event.title' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
           echo "Tiqet red zigzag identity, warm ivory screens and event detail wave header applied."
 
-      - name: Restore previous Tiqet launcher artwork and shrink only
+      - name: Preserve existing Tiqet launcher artwork and shrink it only
         shell: bash
         run: |
           set -euo pipefail
@@ -121,24 +121,30 @@ jobs:
           from pathlib import Path
           import os, re
           root = Path(os.environ["PROJECT_DIR"])
-          p = root / "app/src/main/res/drawable/ic_launcher_foreground.xml"
-          s = p.read_text()
-          # Preserve the approved vector artwork. Only reduce its group scale.
-          signature = 'M34,39 H74 V48 H59 V70 H49 V48 H34 Z'
-          if signature not in s:
-              raise SystemExit("Approved previous launcher artwork signature not found; refusing to alter a different logo.")
-          s2, nx = re.subn(r'android:scaleX="[^"]+"', 'android:scaleX="0.72"', s, count=1)
-          s3, ny = re.subn(r'android:scaleY="[^"]+"', 'android:scaleY="0.72"', s2, count=1)
-          if nx != 1 or ny != 1:
-              raise SystemExit("Could not identify the launcher artwork scale attributes.")
-          p.write_text(s3)
-          assert signature in p.read_text()
-          assert 'android:scaleX="0.72"' in p.read_text()
-          assert 'android:scaleY="0.72"' in p.read_text()
-          bg = (root / "app/src/main/res/drawable/ic_launcher_background.xml").read_text()
-          if '#72001C' not in bg:
-              raise SystemExit("Previous solid burgundy launcher background was not preserved.")
-          print("Previous approved launcher artwork/background retained; only scale reduced to 72%.")
+          targets = [
+              root / "app/src/main/res/drawable/ic_launcher_foreground.xml",
+              root / "app/src/main/res/drawable/ic_launcher_monochrome.xml",
+              root / "app/src/main/res/mipmap-anydpi/ic_launcher.xml",
+              root / "app/src/main/res/mipmap-anydpi/ic_launcher_round.xml",
+          ]
+          for p in targets:
+              if not p.is_file():
+                  raise SystemExit(f"Missing launcher vector: {p}")
+              original = p.read_text()
+              match = re.search(r'<group\\b[^>]*>', original)
+              if not match:
+                  raise SystemExit(f"No artwork group found in {p}")
+              tag = match.group(0)
+              tag2, nx = re.subn(r'android:scaleX="[^"]+"', 'android:scaleX="0.72"', tag, count=1)
+              tag3, ny = re.subn(r'android:scaleY="[^"]+"', 'android:scaleY="0.72"', tag2, count=1)
+              if nx != 1 or ny != 1:
+                  raise SystemExit(f"Expected existing scale attributes in {p}; refusing to redraw artwork.")
+              updated = original[:match.start()] + tag3 + original[match.end():]
+              p.write_text(updated)
+              # Assert that geometry, fills, ticket shape and background remain unchanged.
+              assert p.read_text().count('android:scaleX="0.72"') == 1
+              assert p.read_text().count('android:scaleY="0.72"') == 1
+          print("Existing Tiqet launcher artwork, colours and backgrounds preserved; only vector-group scale set to 72%.")
           PY
 
       - name: Overlay canonical deployed Edge Function source
