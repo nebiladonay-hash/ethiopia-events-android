@@ -105,6 +105,21 @@ jobs:
           test -s "$PROJECT_DIR/supabase/functions/_shared/payment-provider.ts"
           echo "Canonical backend function sources overlaid from the reviewed repository files."
 
+      - name: Package prepared Android source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/tiqet-v7"
+          zip -qr "$RUNNER_TEMP/tiqet-v7-2-android-source.zip" tiqet-android
+          test -s "$RUNNER_TEMP/tiqet-v7-2-android-source.zip"
+
+      - name: Upload prepared Android source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiqet-v7-2-android-source
+          path: ${{ runner.temp }}/tiqet-v7-2-android-source.zip
+          if-no-files-found: error
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
