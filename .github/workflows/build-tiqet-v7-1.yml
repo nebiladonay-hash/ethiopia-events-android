@@ -119,8 +119,9 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import re
-          p = Path("$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_foreground.xml")
+          import os, re
+          root = Path(os.environ["PROJECT_DIR"])
+          p = root / "app/src/main/res/drawable/ic_launcher_foreground.xml"
           s = p.read_text()
           # Preserve the approved vector artwork. Only reduce its group scale.
           signature = 'M34,39 H74 V48 H59 V70 H49 V48 H34 Z'
@@ -134,7 +135,7 @@ jobs:
           assert signature in p.read_text()
           assert 'android:scaleX="0.72"' in p.read_text()
           assert 'android:scaleY="0.72"' in p.read_text()
-          bg = Path("$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_background.xml").read_text()
+          bg = (root / "app/src/main/res/drawable/ic_launcher_background.xml").read_text()
           if '#72001C' not in bg:
               raise SystemExit("Previous solid burgundy launcher background was not preserved.")
           print("Previous approved launcher artwork/background retained; only scale reduced to 72%.")
