@@ -13,6 +13,7 @@ on:
       - 'patches/v7-2-minimal-ui.patch.gz.b64'
       - 'patches/v7-2-wave-ui.patch.gz.b64'
       - 'patches/v7-2-wave-finish.patch.gz.b64'
+      - 'patches/v7-2-launcher-scale-only.patch.gz.b64'
       - '.github/workflows/build-tiqet-v7-1.yml'
 
 permissions:
@@ -101,7 +102,7 @@ jobs:
           grep -q 'android:scaleX="0.82"' "$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_foreground.xml"
           echo "Full-width red wave headers and the smaller adaptive launcher mark are in place."
 
-      - name: Apply final Tiqet palette, zigzag ribbon, event header and launcher refinement
+      - name: Apply final Tiqet palette, zigzag ribbon and event header
         shell: bash
         run: |
           set -euo pipefail
@@ -110,9 +111,19 @@ jobs:
             | patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch
           grep -q 'val zigzag = Path()' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetBrand.kt"
           grep -q 'title = event.title' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
-          grep -q 'android:scaleX="0.78"' "$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_foreground.xml"
-          grep -q 'android:startColor="#5A071F"' "$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_background.xml"
-          echo "Tiqet red zigzag identity, warm ivory screens, event detail wave header and smaller launcher mark applied."
+          echo "Tiqet red zigzag identity, warm ivory screens and event detail wave header applied."
+
+      - name: Restore previous Tiqet launcher artwork and shrink only
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode "$GITHUB_WORKSPACE/patches/v7-2-launcher-scale-only.patch.gz.b64" \
+            | gzip -dc \
+            | patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch
+          grep -q 'android:scaleX="0.72" android:scaleY="0.72"' "$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_foreground.xml"
+          grep -q 'M34,39 H74 V48 H59 V70 H49 V48 H34 Z' "$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_foreground.xml"
+          grep -q 'android:fillColor="#72001C"' "$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_background.xml"
+          echo "Previous approved launcher artwork and solid background restored; artwork alone reduced to 72% scale."
 
       - name: Overlay canonical deployed Edge Function source
         shell: bash
