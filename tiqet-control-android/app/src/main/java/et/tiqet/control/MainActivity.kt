@@ -236,6 +236,7 @@ private fun ControlWorkspace(
     var staff by remember { mutableStateOf(JSONArray()) }
     var audit by remember { mutableStateOf(JSONArray()) }
     var finance by remember { mutableStateOf(JSONObject()) }
+    var refundsDashboard by remember { mutableStateOf(JSONObject()) }
     var selectedTab by remember { mutableStateOf(ControlTab.OVERVIEW) }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -258,6 +259,7 @@ private fun ControlWorkspace(
                     verifiedOrganisers = api.getVerifiedOrganisers(session)
                     audit = api.getAuditLog(session)
                     finance = api.getFinanceDashboard(session)
+                    refundsDashboard = api.getRefundsDashboard(session)
                 }
                 if (overview.optBoolean("super_admin_access")) {
                     staff = api.getStaffDirectory(session)
@@ -424,7 +426,43 @@ private fun ControlWorkspace(
                     onError = { error = it }
                 )
                 ControlTab.ACTIVITY -> ActivityScreen(entries = audit, busy = busy)
-                ControlTab.FINANCE -> FinanceScreen(finance = finance, busy = busy)
+                ControlTab.FINANCE -> FinanceScreen(
+                    finance = finance,
+                    refundsDashboard = refundsDashboard,
+                    busy = busy,
+                    onRequestRefund = { paymentId, amountMinor, reason, idempotencyKey ->
+                        scope.launch {
+                            busy = true
+                            error = null
+                            try {
+                                val result = api.createChapaRefund(session, paymentId, amountMinor, reason, idempotencyKey)
+                                notice = "Chapa refund request recorded: \${result.optString("status", "pending")}. Verify the individual refund before closing the finance review."
+                                finance = api.getFinanceDashboard(session)
+                                refundsDashboard = api.getRefundsDashboard(session)
+                            } catch (e: Exception) {
+                                error = e.message ?: "Could not create the Chapa refund request."
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    },
+                    onVerifyRefund = { refundId ->
+                        scope.launch {
+                            busy = true
+                            error = null
+                            try {
+                                val result = api.verifyChapaRefund(session, refundId)
+                                notice = "Chapa refund verification: \${result.optString("status", "unknown")}. Ticket and settlement reconciliation remains in the finance review queue."
+                                finance = api.getFinanceDashboard(session)
+                                refundsDashboard = api.getRefundsDashboard(session)
+                            } catch (e: Exception) {
+                                error = e.message ?: "Could not verify the Chapa refund."
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    }
+                )
                 ControlTab.USERS -> UserModerationScreen(
                     api = api,
                     session = session,
@@ -1154,7 +1192,13 @@ private fun UserModerationScreen(
 }
 
 @Composable
-private fun FinanceScreen(finance: JSONObject, busy: Boolean) {
+private fun FinanceScreen(
+    finance: JSONObject,
+    refundsDashboard: JSONObject,
+    busy: Boolean,
+    onRequestRefund: (paymentId: String, amountMinor: Long?, reason: String, idempotencyKey: String) -> Unit,
+    onVerifyRefund: (refundId: String) -> Unit
+) {
     val summary = finance.optJSONObject("summary") ?: JSONObject()
     val payments = finance.optJSONArray("recent_payments") ?: JSONArray()
     val refunds = finance.optJSONArray("refund_alerts") ?: JSONArray()
