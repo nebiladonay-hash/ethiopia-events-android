@@ -790,6 +790,8 @@ private fun UserModerationScreen(
     var query by remember { mutableStateOf("") }
     var reason by remember { mutableStateOf("") }
     var results by remember { mutableStateOf(JSONArray()) }
+    var history by remember { mutableStateOf(JSONArray()) }
+    var historyTarget by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var selectedUser by remember { mutableStateOf<JSONObject?>(null) }
     var selectedAction by remember { mutableStateOf("suspend") }
@@ -837,6 +839,35 @@ private fun UserModerationScreen(
                         Text(user.optString("email"),color=Ink,fontSize=12.sp,fontWeight=FontWeight.Bold)
                         if(user.optString("full_name").isNotBlank()) Text(user.optString("full_name"),color=Muted,fontSize=10.sp)
                         Text(if(banned) "Ban expiry: $banValue" else "No active ban recorded",color=if(banned) Danger else Teal,fontSize=10.sp)
+                        TextButton(
+                            onClick={
+                                scope.launch {
+                                    historyTarget=user.optString("user_id")
+                                    try {
+                                        history=api.getUserModerationHistory(session,historyTarget)
+                                    } catch(e:Exception) {
+                                        onError(e.message ?: "Could not load moderation history.")
+                                    }
+                                }
+                            },
+                            contentPadding=PaddingValues(horizontal=0.dp,vertical=2.dp)
+                        ) { Text("View moderation history",color=Teal,fontSize=10.sp) }
+                        if(historyTarget==user.optString("user_id")) {
+                            if(history.length()==0) {
+                                Text("No moderation actions recorded.",color=Muted,fontSize=9.sp)
+                            } else {
+                                for(index in 0 until minOf(history.length(),4)) {
+                                    val entry=history.optJSONObject(index) ?: continue
+                                    Text(
+                                        "${entry.optString("action")} · ${entry.optString("status")} · ${entry.optString("created_at").take(16).replace("T"," ")}",
+                                        color=Ink,fontSize=9.sp
+                                    )
+                                    if(entry.optString("reason").isNotBlank()) {
+                                        Text(entry.optString("reason"),color=Muted,fontSize=9.sp)
+                                    }
+                                }
+                            }
+                        }
                         if(staffRole.isNotBlank()) {
                             Text("Staff account: $staffRole. Manage staff access in the Team section.",color=Muted,fontSize=10.sp)
                         } else {
