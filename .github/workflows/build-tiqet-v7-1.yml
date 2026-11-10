@@ -5,11 +5,13 @@ on:
   push:
     branches:
       - v7.1-integration
+      - tiqet-payment-method-selector
     paths:
       - 'Tiqet_Android_V7_1.zip'
       - 'supabase/functions/**'
       - 'supabase/migrations/**'
       - 'patches/v7-2-payment-methods-api.patch'
+      - 'patches/v7-2-payment-methods-ui.patch'
       - 'patches/v7-2-minimal-ui.patch.gz.b64'
       - 'patches/v7-2-wave-ui.patch.gz.b64'
       - 'patches/v7-2-wave-finish.patch.gz.b64'
@@ -70,6 +72,16 @@ jobs:
           grep -q 'fun fetchChapaPaymentMethods' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
           echo "Payment-method API patch applied."
 
+      - name: Apply Chapa payment-method selector to ticket booking
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch < "$GITHUB_WORKSPACE/patches/v7-2-payment-methods-ui.patch"
+          grep -q 'selectedPaymentMethod' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
+          grep -q 'PAY WITH' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
+          grep -q 'fetchChapaPaymentMethods' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
+          echo "Customer checkout now displays provider-enabled Chapa payment methods."
+          
       - name: Apply approved minimalist Tiqet branding and full UI refresh
         shell: bash
         run: |
