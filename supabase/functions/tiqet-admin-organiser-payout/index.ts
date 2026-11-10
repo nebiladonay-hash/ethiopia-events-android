@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { organiserPayoutTransitions, canTransitionOrganiserPayout } from "./policy.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -14,15 +15,6 @@ function json(body: unknown, status = 200) {
 }
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const transitions: Record<string, Set<string>> = {
-  requested: new Set(["approved", "rejected"]),
-  approved: new Set(["processing", "rejected", "failed"]),
-  processing: new Set(["paid", "failed"]),
-  paid: new Set(["reversed"]),
-  rejected: new Set(),
-  failed: new Set(),
-  reversed: new Set(),
-};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -69,7 +61,7 @@ Deno.serve(async (req) => {
   const operatorNote = String(body.operator_note ?? "").trim();
 
   if (!uuidPattern.test(requestId)) return json({ error: "A valid organiser payout request ID is required" }, 400);
-  if (!Object.hasOwn(transitions, nextStatus)) {
+  if (!Object.hasOwn(organiserPayoutTransitions, nextStatus)) {
     return json({ error: "Status must be approved, processing, paid, rejected, failed or reversed" }, 400);
   }
   if (operatorNote.length < 5 || operatorNote.length > 500) {
@@ -92,7 +84,7 @@ Deno.serve(async (req) => {
   if (!requestRow) return json({ error: "Organiser payout request was not found" }, 404);
 
   const currentStatus = String(requestRow.status ?? "");
-  if (!transitions[currentStatus]?.has(nextStatus)) {
+  if (!canTransitionOrganiserPayout(currentStatus, nextStatus)) {
     return json({
       error: `Payout cannot move from ${currentStatus || "unknown"} to ${nextStatus}. Refresh the finance queue and review its current state.`,
       current_status: currentStatus,
