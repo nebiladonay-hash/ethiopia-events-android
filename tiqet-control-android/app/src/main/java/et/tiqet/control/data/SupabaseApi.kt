@@ -64,6 +64,35 @@ class SupabaseApi(
         return result.optJSONArray("users") ?: JSONArray()
     }
 
+    suspend fun getUserModerationHistory(session: ControlSession, userId: String): JSONArray {
+        val result = rpc(
+            session,
+            "get_tiqet_user_moderation_history",
+            JSONObject().put("p_user_id", userId).put("p_limit", 20)
+        )
+        return result.optJSONArray("history") ?: JSONArray()
+    }
+
+    suspend fun moderateUser(
+        session: ControlSession,
+        userId: String,
+        action: String,
+        duration: String?,
+        reason: String
+    ): JSONObject = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("target_user_id", userId)
+            .put("action", action)
+            .put("reason", reason)
+        if (!duration.isNullOrBlank()) body.put("duration", duration)
+        request(
+            method = "POST",
+            path = "/functions/v1/tiqet-admin-user-action",
+            body = body,
+            session = session
+        )
+    }
+
     suspend fun reviewOrganiser(
         session: ControlSession,
         organisationId: String,
