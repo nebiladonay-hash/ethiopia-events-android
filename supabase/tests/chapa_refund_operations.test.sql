@@ -143,6 +143,31 @@ BEGIN
     RAISE EXCEPTION 'TEST_ASSERT: partially refunded payment should remain succeeded';
   END IF;
 
+  -- A late refund webhook first marks the payment for review. It may restore the
+  -- partial-refund state only when cumulative webhook totals match verified rows.
+  UPDATE public.payments SET status = 'review' WHERE id = v_payment;
+  v_result := public.reconcile_chapa_refund_notice('TQ-PAY-REFUND-TEST-1', 400);
+  IF coalesce((v_result->>'reconciled')::boolean, false) IS NOT TRUE
+     OR (SELECT status FROM public.payments WHERE id = v_payment) <> 'succeeded' THEN
+    RAISE EXCEPTION 'TEST_ASSERT: matching late webhook did not reconcile verified partial refund';
+  END IF;
+
+  -- A separate unmatched webhook must remain in manual review.
+  INSERT INTO public.orders(status) VALUES ('paid') RETURNING id INTO v_second_order;
+  INSERT INTO public.payments(
+    order_id, provider, merchant_reference, provider_reference,
+    amount_minor, currency, status
+  ) VALUES (
+    v_second_order, 'chapa', 'TQ-PAY-REFUND-UNMATCHED', 'CHAPA-PAY-REF-UNMATCHED',
+    1000, 'ETB', 'succeeded'
+  ) RETURNING id INTO v_second_payment;
+  UPDATE public.payments SET status = 'review' WHERE id = v_second_payment;
+  v_result := public.reconcile_chapa_refund_notice('TQ-PAY-REFUND-UNMATCHED', 100);
+  IF coalesce((v_result->>'reconciled')::boolean, false) IS TRUE
+     OR (SELECT status FROM public.payments WHERE id = v_second_payment) <> 'review' THEN
+    RAISE EXCEPTION 'TEST_ASSERT: unmatched webhook did not remain in review';
+  END IF;
+
   -- A second partial refund may consume only the remaining 600 units.
   PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
   v_result := public.prepare_chapa_refund(
@@ -193,12 +218,12 @@ BEGIN
   END;
 
   -- Explicit full-refund request omits the amount but reserves the exact paid amount.
-  INSERT INTO public.orders(status) VALUES ('paid') RETURNING id INTO v_second_order;
+  INSERT INTO public.orders(status) VALUES ('paid') RETURNING id INTO v_order;
   INSERT INTO public.payments(
     order_id, provider, merchant_reference, provider_reference,
     amount_minor, currency, status
   ) VALUES (
-    v_second_order, 'chapa', 'TQ-PAY-REFUND-TEST-2', 'CHAPA-PAY-REF-2',
+    v_order, 'chapa', 'TQ-PAY-REFUND-TEST-2', 'CHAPA-PAY-REF-2',
     800, 'ETB', 'succeeded'
   ) RETURNING id INTO v_second_payment;
 
