@@ -1308,14 +1308,14 @@ private fun FinanceScreen(
                     Text(row.optString("reason"),color=Muted,fontSize=10.sp)
                     Text("Payment: ${row.optString("payment_merchant_reference")}",color=Muted,fontSize=9.sp)
                     Text("Refund ref: ${row.optString("provider_reference").ifBlank { row.optString("merchant_reference") }}",color=Muted,fontSize=9.sp)
-                    if (row.optString("status") in listOf("requested","pending") &&
+                    if (row.optString("status") in listOf("pending","review") &&
                         row.optString("provider_reference").isNotBlank()) {
                         TextButton(
                             onClick = { onVerifyRefund(row.optString("id")) },
                             enabled = !busy,
                             contentPadding = PaddingValues(horizontal=4.dp,vertical=3.dp)
                         ) { Text("Verify with Chapa",color=Teal,fontSize=11.sp) }
-                    } else if (row.optString("status") == "requested" &&
+                    } else if (row.optString("status") in listOf("requested","submission_unknown") &&
                         row.optString("provider_reference").isBlank() &&
                         row.optString("idempotency_key").isNotBlank()) {
                         TextButton(
