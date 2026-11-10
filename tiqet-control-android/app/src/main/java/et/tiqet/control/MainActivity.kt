@@ -441,6 +441,14 @@ private fun ControlWorkspace(
                                 refundsDashboard = api.getRefundsDashboard(session)
                             } catch (e: Exception) {
                                 error = e.message ?: "Could not create the Chapa refund request."
+                                // A timeout can mean Chapa accepted the request but the response was lost.
+                                // Reload the persisted operation so the original idempotency-key retry is visible.
+                                try {
+                                    finance = api.getFinanceDashboard(session)
+                                    refundsDashboard = api.getRefundsDashboard(session)
+                                } catch (_: Exception) {
+                                    // Keep the original request error; a later manual refresh can recover the dashboard.
+                                }
                             } finally {
                                 busy = false
                             }
@@ -458,6 +466,12 @@ private fun ControlWorkspace(
                                 refundsDashboard = api.getRefundsDashboard(session)
                             } catch (e: Exception) {
                                 error = e.message ?: "Could not verify the Chapa refund."
+                                try {
+                                    finance = api.getFinanceDashboard(session)
+                                    refundsDashboard = api.getRefundsDashboard(session)
+                                } catch (_: Exception) {
+                                    // Keep the original verification error; a later manual refresh can recover the dashboard.
+                                }
                             } finally {
                                 busy = false
                             }
