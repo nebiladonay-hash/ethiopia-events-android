@@ -15,6 +15,8 @@ Deno.serve(async (req) => {
   const chapaKey = Deno.env.get('CHAPA_PRIVATE_KEY')
   const chapaMode = Deno.env.get('CHAPA_MODE')?.toLowerCase()
   if (!chapaKey || !['test', 'live'].includes(chapaMode ?? '')) return json({ error: 'Configure CHAPA_PRIVATE_KEY and CHAPA_MODE (test or live) in Supabase Edge Function secrets' }, 503)
+  const keyMode = chapaKey.startsWith('CHAPA_TEST_') ? 'test' : chapaKey.startsWith('CHAPA_LIVE_') ? 'live' : null
+  if (keyMode && keyMode !== chapaMode) return json({ error: 'Chapa API key environment does not match CHAPA_MODE' }, 503)
   if (chapaMode === 'live' && Deno.env.get('TIQET_LIVE_PAYOUTS_ENABLED') !== 'true') {
     return json({ error: 'Live platform withdrawals are locked until Tiqet and Chapa have approved the marketplace payout flow.' }, 403)
   }
