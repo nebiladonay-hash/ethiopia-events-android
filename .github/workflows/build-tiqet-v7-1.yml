@@ -11,7 +11,6 @@ on:
       - 'supabase/functions/**'
       - 'supabase/migrations/**'
       - 'patches/v7-2-payment-methods-api.patch'
-      - 'patches/v7-2-payment-methods-ui.patch'
       - 'patches/v7-2-minimal-ui.patch.gz.b64'
       - 'patches/v7-2-wave-ui.patch.gz.b64'
       - 'patches/v7-2-wave-finish.patch.gz.b64'
@@ -72,42 +71,13 @@ jobs:
           grep -q 'fun fetchChapaPaymentMethods' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
           echo "Payment-method API patch applied."
 
-      - name: Apply Chapa payment-method selector to ticket booking
-        shell: bash
-        run: |
-          set -euo pipefail
-          patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch < "$GITHUB_WORKSPACE/patches/v7-2-payment-methods-ui.patch"
-          grep -q 'selectedPaymentMethod' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
-          grep -q 'PAY WITH' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
-          grep -q 'fetchChapaPaymentMethods' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
-          echo "Customer checkout now displays provider-enabled Chapa payment methods."
-          
       - name: Apply approved minimalist Tiqet branding and full UI refresh
         shell: bash
         run: |
           set -euo pipefail
           base64 --decode "$GITHUB_WORKSPACE/patches/v7-2-minimal-ui.patch.gz.b64" \
             | gzip -dc \
-            | patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch --fuzz=4 || true
-          MAIN_ACTIVITY="$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
-          REJECTS="$MAIN_ACTIVITY.rej"
-          if [ -f "$REJECTS" ]; then
-            # One branding hunk replaces the original Chapa checkout call. The
-            # payment-method UI patch already replaced that exact line with the
-            # method-aware call, so accept only this precise, already-applied
-            # overlap; all other rejects remain fatal.
-            if grep -Fq 'api.createChapaCheckout(ticketTypeId, ticketCount)' "$REJECTS" \
-              && grep -Fq 'selectedPaymentMethod.takeIf' "$REJECTS" \
-              && [ "$(grep -c '^@@' "$REJECTS")" -eq 1 ]; then
-              test "$(grep -Fc 'api.createChapaCheckout(' "$MAIN_ACTIVITY")" -eq 1
-              grep -Fq 'selectedPaymentMethod.takeIf' "$MAIN_ACTIVITY"
-              rm "$REJECTS"
-            else
-              echo "Unexpected branding patch conflict; refusing to continue."
-              cat "$REJECTS"
-              exit 1
-            fi
-          fi
+            | patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch
           # Vector launcher resources replace the old raster icons, preventing Android from selecting stale density-specific bitmaps.
           for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
             rm -f "$PROJECT_DIR/app/src/main/res/mipmap-$density/ic_launcher.png"
