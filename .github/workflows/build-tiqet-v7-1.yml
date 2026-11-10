@@ -88,7 +88,7 @@ jobs:
           set -euo pipefail
           base64 --decode "$GITHUB_WORKSPACE/patches/v7-2-minimal-ui.patch.gz.b64" \
             | gzip -dc \
-            | patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch --fuzz=4
+            | patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch --fuzz=8
           # Vector launcher resources replace the old raster icons, preventing Android from selecting stale density-specific bitmaps.
           for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
             rm -f "$PROJECT_DIR/app/src/main/res/mipmap-$density/ic_launcher.png"
