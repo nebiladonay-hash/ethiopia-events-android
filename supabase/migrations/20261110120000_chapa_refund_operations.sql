@@ -294,6 +294,73 @@ begin
 end;
 $function$;
 
+-- Payout webhook and synchronous verification can race. Persist provider status
+-- under a row lock and prevent stale non-terminal notifications from regressing
+-- a payout that already reached a terminal state. A verified reversal may follow
+-- a previously successful payout.
+create or replace function public.record_tiqet_platform_payout_result(
+  p_payout_id uuid,
+  p_status text,
+  p_provider_reference text,
+  p_provider_service_fee_minor bigint,
+  p_provider_payload jsonb
+) returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_payout public.platform_payouts%rowtype;
+  v_terminal boolean;
+  v_ignored boolean := false;
+begin
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
+    raise exception 'Service role required';
+  end if;
+  if p_payout_id is null or p_status not in (
+    'pending','succeeded','failed','reversed','blocked','auth_needed','otp_needed','otp_failed'
+  ) or p_provider_service_fee_minor is null or p_provider_service_fee_minor < 0 then
+    raise exception 'Invalid platform payout result';
+  end if;
+
+  select * into v_payout
+  from public.platform_payouts
+  where id = p_payout_id
+  for update;
+  if not found then raise exception 'Platform payout not found'; end if;
+
+  v_terminal := v_payout.status in ('succeeded','failed','reversed','blocked','otp_failed');
+  if v_terminal and v_payout.status <> p_status then
+    if not (v_payout.status = 'succeeded' and p_status = 'reversed') then
+      v_ignored := true;
+      return jsonb_build_object(
+        'payout_id', v_payout.id,
+        'status', v_payout.status,
+        'ignored_conflicting_status', true
+      );
+    end if;
+  end if;
+
+  update public.platform_payouts
+  set status = p_status,
+      provider_reference = coalesce(nullif(p_provider_reference,''), provider_reference),
+      provider_service_fee_minor = p_provider_service_fee_minor,
+      provider_payload = coalesce(p_provider_payload,'{}'::jsonb),
+      updated_at = now()
+  where id = p_payout_id
+  returning * into v_payout;
+
+  return jsonb_build_object(
+    'payout_id', v_payout.id,
+    'status', v_payout.status,
+    'ignored_conflicting_status', v_ignored
+  );
+end;
+$function$;
+
+revoke all on function public.record_tiqet_platform_payout_result(uuid,text,text,bigint,jsonb) from public, anon, authenticated;
+grant execute on function public.record_tiqet_platform_payout_result(uuid,text,text,bigint,jsonb) to service_role;
+
 revoke all on function public.prepare_chapa_refund(uuid,bigint,text,text) from public, anon;
 grant execute on function public.prepare_chapa_refund(uuid,bigint,text,text) to authenticated;
 revoke all on function public.record_chapa_refund_result(uuid,text,text,jsonb,text) from public, anon, authenticated;
