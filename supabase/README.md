@@ -29,6 +29,7 @@ The existing Tiqet core schema was already present before this connected product
 - `20261110052734_tiqet_control_finance_monitoring`
 - `20261110053407_tiqet_control_user_moderation`
 - `20261110054513_tiqet_trusted_organiser_auto_publish_policy`
+- `20261110054800_tiqet_control_published_event_moderation_queue`
 
 The remote schema contains 24 public tables; all observed public tables have RLS enabled. Internal accounting/provider/webhook tables are service-role-only. The production migration history does **not** yet represent the older baseline schema files in the V7.1 archive. Do not run `supabase db push` from the archive until the baseline is reconciled. The GitHub backend workflow is currently a package/source verification workflow only and does not push schema changes.
 
@@ -200,3 +201,11 @@ The current companion-app source is an initial functional control MVP. Account s
 - A rejected/request-changes event retains an active review flag. Even if its organizer is trusted, resubmitting that event routes back to manual review. Only a later moderator approval resolves the flag.
 - Trust and event-flag records are private server-managed tables (RLS enabled; no direct client table grants). All trust changes and event flags are audited.
 - Rollback-only smoke test passed: trusted new event auto-published; published-event flag returned it to the review queue; request-changes returned it to draft; resubmission remained pending because the active flag persisted. Test transaction rolled back and left no test event or organizer.
+
+
+### Ongoing published-event moderation
+
+- `get_tiqet_published_events_for_review(p_limit)` returns a limited list of currently published/approved events only to authenticated moderators/admins. It returns public event fields plus organiser name, and does not include private organizer payout details.
+- Tiqet Control's Event Moderation section now has two queues: pending submissions and currently published events.
+- Moderators can flag a published event with a required reason. The backend immediately changes it to `submitted/pending`, removing it from the public published listing, and records the action in the audit log.
+- A flagged event remains subject to manual review even if its organizer has auto-publish trust enabled.
