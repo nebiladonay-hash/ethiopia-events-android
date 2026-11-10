@@ -98,7 +98,21 @@ jobs:
             # overlap; all other rejects remain fatal.
             if grep -Fq 'api.createChapaCheckout(ticketTypeId, ticketCount)' "$REJECTS" \
               && grep -Fq 'selectedPaymentMethod.takeIf' "$REJECTS" \
-              && grep -Fq 'api.createChapaCheckout(ticketTypeId, ticketCount, selectedPaymentMethod.takeIf' "$MAIN_ACTIVITY"; then
+              && [ "$(grep -c '^@@' "$REJECTS")" -eq 1 ]; then
+              python3 - <<'PY'
+          from pathlib import Path
+          import os
+
+          path = Path(os.environ["PROJECT_DIR"]) / "app/src/main/java/et/events/mobile/MainActivity.kt"
+          source = path.read_text()
+          old = "api.createChapaCheckout(ticketTypeId, ticketCount)"
+          new = "api.createChapaCheckout(ticketTypeId, ticketCount, selectedPaymentMethod.takeIf { it.isNotBlank() })"
+          if source.count(old) != 1:
+              raise SystemExit("Expected exactly one original Chapa checkout call to update.")
+          path.write_text(source.replace(old, new, 1))
+          print("Applied the exact method-aware checkout argument from the single rejected patch hunk.")
+          PY
+              grep -Fq 'api.createChapaCheckout(ticketTypeId, ticketCount, selectedPaymentMethod.takeIf' "$MAIN_ACTIVITY"
               rm "$REJECTS"
             else
               echo "Unexpected branding patch conflict; refusing to continue."
