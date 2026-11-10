@@ -157,7 +157,7 @@ Build workflow:
 - Workflow: `.github/workflows/build-tiqet-control.yml`
 - Artifact name: `tiqet-control-debug-apk`
 
-The current companion-app source is an initial functional control MVP. Account suspension and broader user moderation, staff-device session management, encrypted local session persistence and release signing are not implemented yet. The initial Finance tab is read-only; it does not initiate refunds or payouts. No APK should be considered validated until the current workflow run succeeds and the resulting artifact has been smoke-tested on a device.
+The current companion-app source is an initial functional control MVP. Account search, temporary sign-in suspension/restoration, and moderation history are now implemented. Staff-device session management, encrypted local session persistence and release signing are not implemented yet. Finance remains read-only; it does not initiate refunds or payouts.
 
 
 ### Finance monitoring RPC
@@ -179,3 +179,12 @@ The current companion-app source is an initial functional control MVP. Account s
 - Supported temporary bans: 24 hours, 7 days and 30 days. Restore clears the ban.
 - A temporary Auth ban blocks new sign-ins during the ban period; it does not immediately invalidate already-issued access tokens. Backend authorization must remain enforced on sensitive actions.
 - No user has been suspended or restored as part of development/testing.
+
+
+### Build and deployment verification — 10 November 2026
+
+- The initial Control Android build completed successfully on the `tiqet-control-v1` branch with Android SDK 37.2 and Gradle 9.6.0.
+- The build artifact is `tiqet-control-debug-apk` from GitHub Actions run `42762769299`.
+- The account-moderation Edge Function `tiqet-admin-user-action` is deployed and ACTIVE in TIqet-production with JWT verification enabled.
+- The moderation migration has been applied in production; the moderation history table is empty and no account was suspended or restored as a development test.
+- The latest Account Moderation UI/API changes trigger a fresh Android build. Do not distribute that newer build until its CI artifact succeeds and is device-smoke-tested.
