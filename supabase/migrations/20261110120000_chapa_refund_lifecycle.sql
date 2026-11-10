@@ -306,6 +306,8 @@ begin
         select jsonb_build_object(
           'id',r.id,'payment_id',r.payment_id,'order_id',r.order_id,
           'merchant_reference',r.merchant_reference,'provider_reference',r.provider_reference,
+          'idempotency_key',r.idempotency_key,'requested_amount_minor',r.requested_amount_minor,
+          'request_full_refund',r.request_full_refund,
           'amount_minor',r.amount_minor,'currency',r.currency,'reason',r.reason,
           'status',r.status,'provider_status',r.provider_status,
           'error_message',r.error_message,'requested_by',r.requested_by,
