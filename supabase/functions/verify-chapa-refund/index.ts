@@ -61,8 +61,8 @@ Deno.serve(async (req) => {
   if (!refund.provider_reference) {
     return json({ error: 'Chapa has not assigned a refund reference yet. Retry the original create request using its original idempotency key.' }, 409)
   }
-  if (refund.status === 'failed') {
-    return json({ refund_id: refund.id, status: 'failed', already_final: true })
+  if (refund.status === 'failed' || refund.status === 'succeeded') {
+    return json({ refund_id: refund.id, status: refund.status, already_final: true })
   }
 
   const { data: payment, error: paymentError } = await admin.from('payments')
