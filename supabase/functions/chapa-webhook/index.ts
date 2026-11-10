@@ -37,8 +37,16 @@ Deno.serve(async (req) => {
   if (!constantTimeEqual(received.toLowerCase(), expected.toLowerCase())) return json({ error: 'Invalid webhook signature' }, 401)
   let event: Record<string, unknown>
   try { event = JSON.parse(rawBody) } catch { return json({ error: 'Invalid JSON' }, 400) }
-  const expectedMode = Deno.env.get('CHAPA_MODE')
-  if (expectedMode && event.mode && String(event.mode).toLowerCase() !== expectedMode.toLowerCase()) {
+  const expectedMode = Deno.env.get('CHAPA_MODE')?.toLowerCase()
+  if (!['test', 'live'].includes(expectedMode ?? '')) {
+    return json({ error: 'CHAPA_MODE must be configured as test or live before accepting Chapa webhooks' }, 503)
+  }
+  const keyMode = chapaPrivateKey.startsWith('CHAPA_TEST_') ? 'test'
+    : chapaPrivateKey.startsWith('CHAPA_LIVE_') ? 'live' : null
+  if (keyMode && keyMode !== expectedMode) {
+    return json({ error: 'Chapa API key environment does not match CHAPA_MODE' }, 503)
+  }
+  if (event.mode && String(event.mode).toLowerCase() !== expectedMode) {
     return json({ error: 'Webhook environment does not match this deployment' }, 401)
   }
   const merchantReference = String(event.merchant_reference ?? '')
