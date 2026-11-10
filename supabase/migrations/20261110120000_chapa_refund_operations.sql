@@ -317,7 +317,7 @@ begin
   if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
     raise exception 'Service role required';
   end if;
-  if p_payout_id is null or p_status not in (
+  if p_payout_id is null or p_status is null or p_status not in (
     'pending','succeeded','failed','reversed','blocked','auth_needed','otp_needed','otp_failed'
   ) or p_provider_service_fee_minor is null or p_provider_service_fee_minor < 0 then
     raise exception 'Invalid platform payout result';
