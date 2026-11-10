@@ -8,14 +8,19 @@ function constantTimeEqual(a: string, b: string): boolean {
   for (let i = 0; i < 64; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
   return diff === 0
 }
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(buffer).set(bytes)
+  return buffer
+}
 async function hmacSha256(secret: string, rawBytes: Uint8Array): Promise<string> {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret),
     { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-  const signature = await crypto.subtle.sign('HMAC', key, rawBytes)
+  const signature = await crypto.subtle.sign('HMAC', key, toArrayBuffer(rawBytes))
   return hex(new Uint8Array(signature))
 }
 async function sha256(rawBytes: Uint8Array): Promise<string> {
-  return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', rawBytes)))
+  return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', toArrayBuffer(rawBytes))))
 }
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -52,7 +57,10 @@ Deno.serve(async (req) => {
       { headers: { Authorization: `Bearer ${chapaPrivateKey}` } })
     const verified = await verifyResponse.json().catch(() => ({}))
     const details = verified?.data
-    if (!verifyResponse.ok || verified?.status !== 'success' || !details) return json({ received: true, verified: false })
+    if (!verifyResponse.ok || verified?.status !== 'success' || !details) {
+      console.error('Chapa payout verification is temporarily unavailable')
+      return json({ error: 'Chapa payout verification is temporarily unavailable; retry this webhook' }, 503)
+    }
     if (String(details.merchant_reference ?? '') !== payout.merchant_reference ||
         String(details.currency ?? '') !== 'ETB' || Number(details.amount) !== Number(payout.amount_minor)) {
       return json({ error: 'Verified payout does not match the stored withdrawal' }, 409)
@@ -113,6 +121,14 @@ Deno.serve(async (req) => {
       p_currency: currency, p_provider_payload: event,
     })
     if (refundError) return json({ error: 'Could not persist refund notice for reconciliation' }, 500)
+    const { data: reconciliation, error: reconciliationError } = await admin.rpc('reconcile_chapa_refund_notice', {
+      p_merchant_reference: merchantReference,
+      p_refunded_amount_minor: refundedAmountMinor,
+    })
+    if (reconciliationError) {
+      console.error('Could not reconcile refund webhook with verified refund records', reconciliationError.message)
+      return json({ error: 'Refund notice was recorded but payment reconciliation needs retry' }, 503)
+    }
     const { data: refundPayment } = await admin.from('payments')
       .select('id, order_id').eq('merchant_reference', merchantReference).maybeSingle()
     if (refundPayment?.id) {
@@ -124,7 +140,7 @@ Deno.serve(async (req) => {
       }, { onConflict: 'provider,payload_digest', ignoreDuplicates: true })
       if (refundAuditError) console.error('Could not persist refund audit event', refundAuditError.message)
     }
-    return json({ received: true, refund_recorded: true, ...refundResult })
+    return json({ received: true, refund_recorded: true, reconciliation, ...refundResult })
   }
 
   if (event.webhook_type !== 'payment') return json({ received: true, ignored: true })
@@ -138,34 +154,39 @@ Deno.serve(async (req) => {
     { headers: { Authorization: `Bearer ${chapaPrivateKey}` } })
   const verified = await verifyResponse.json().catch(() => ({}))
   const details = verified?.data
-  if (!verifyResponse.ok || verified?.status !== 'success' || details?.status !== 'SUCCESS') {
-    if (event.status === 'failed' || event.status === 'cancelled') {
+  if (!verifyResponse.ok || verified?.status !== 'success' || !details) {
+    console.error('Chapa payment verification is temporarily unavailable')
+    return json({ error: 'Chapa payment verification is temporarily unavailable; retry this webhook' }, 503)
+  }
+  const verifiedStatus = String(details.status ?? '').toUpperCase()
+  if (verifiedStatus !== 'SUCCESS') {
+    if (verifiedStatus === 'FAILED' || verifiedStatus === 'CANCELLED') {
+      const failureReason = verifiedStatus.toLowerCase()
       const { error: failError } = await admin.rpc('fail_order_payment', {
-        p_order_id: payment.order_id, p_reason: String(event.status),
+        p_order_id: payment.order_id, p_reason: failureReason,
       })
-      if (failError) return json({ error: 'Could not persist failed payment state' }, 500)
+      if (failError) return json({ error: 'Could not persist verified failed-payment state' }, 500)
       const failedPayloadHash = await sha256(rawBytes)
       const { error: failedAttemptEventError } = await admin.from('payment_attempt_events').upsert({
         payment_id: payment.id, order_id: payment.order_id, provider: 'chapa', event_type: 'payment_failed',
         provider_event_reference: chapaReference || merchantReference,
         payload_digest: failedPayloadHash,
-        safe_metadata: { provider_status: String(event.status), source: 'signed_webhook' },
+        safe_metadata: { provider_status: verifiedStatus, source: 'verified_api' },
       }, { onConflict: 'provider,payload_digest', ignoreDuplicates: true })
       if (failedAttemptEventError) {
         console.error('Could not persist failed-payment audit event', failedAttemptEventError.message)
         return json({ error: 'Could not persist failed payment audit record' }, 500)
       }
       const { error: failureMetadataError } = await admin.from('payments').update({
-        failure_code: String(event.status), failure_message: 'Provider reported payment failure or cancellation.',
+        failure_code: failureReason, failure_message: 'Chapa verification confirmed payment failure or cancellation.',
       }).eq('id', payment.id)
       if (failureMetadataError) {
         console.error('Could not persist failed-payment details', failureMetadataError.message)
         return json({ error: 'Could not persist failed payment details' }, 500)
       }
     }
-    return json({ received: true, verified: false })
+    return json({ received: true, verified: true, payment_status: verifiedStatus || 'UNKNOWN' })
   }
-
   const amount = Number(details.amount)
   const currency = String(details.currency ?? '')
   const verifiedMerchantReference = String(details.merchant_reference ?? '')
