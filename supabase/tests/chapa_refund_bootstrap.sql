@@ -94,4 +94,5 @@ $$;
 GRANT USAGE ON SCHEMA public, auth TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION auth.role() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION auth.jwt() TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.is_tiqet_admin() TO anon, authenticated, service_role;
