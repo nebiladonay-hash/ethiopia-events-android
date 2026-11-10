@@ -28,6 +28,7 @@ The existing Tiqet core schema was already present before this connected product
 - `20261110052251_tiqet_control_user_search`
 - `20261110052734_tiqet_control_finance_monitoring`
 - `20261110053407_tiqet_control_user_moderation`
+- `20261110054513_tiqet_trusted_organiser_auto_publish_policy`
 
 The remote schema contains 24 public tables; all observed public tables have RLS enabled. Internal accounting/provider/webhook tables are service-role-only. The production migration history does **not** yet represent the older baseline schema files in the V7.1 archive. Do not run `supabase db push` from the archive until the baseline is reconciled. The GitHub backend workflow is currently a package/source verification workflow only and does not push schema changes.
 
@@ -188,3 +189,14 @@ The current companion-app source is an initial functional control MVP. Account s
 - The account-moderation Edge Function `tiqet-admin-user-action` is deployed and ACTIVE in TIqet-production with JWT verification enabled.
 - The moderation migration has been applied in production; the moderation history table is empty and no account was suspended or restored as a development test.
 - The latest Account Moderation UI/API changes trigger a fresh Android build. Do not distribute that newer build until its CI artifact succeeds and is device-smoke-tested.
+
+
+### Trust-based event publishing and review overrides
+
+- Organizer verification remains an administrator-controlled process. An unverified/new organizer cannot publish paid events.
+- Verified organizers default to manual event review. Admins may explicitly grant auto-publishing through the verified-organizer controls in Tiqet Control, with a mandatory 5–500 character reason and audit entry.
+- For a trusted organizer, `submit_event_for_review` publishes a new unflagged event and records the automatic publication in the admin audit log.
+- Moderators can flag an already-published event with a reason. It is immediately moved from public `published/approved` state to `submitted/pending` for review.
+- A rejected/request-changes event retains an active review flag. Even if its organizer is trusted, resubmitting that event routes back to manual review. Only a later moderator approval resolves the flag.
+- Trust and event-flag records are private server-managed tables (RLS enabled; no direct client table grants). All trust changes and event flags are audited.
+- Rollback-only smoke test passed: trusted new event auto-published; published-event flag returned it to the review queue; request-changes returned it to draft; resubmission remained pending because the active flag persisted. Test transaction rolled back and left no test event or organizer.
