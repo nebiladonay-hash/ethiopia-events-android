@@ -91,10 +91,17 @@ Deno.serve(async (req) => {
 
   let preferredMethods: string[] | undefined
   if (body.payment_method) {
-    const methodsResponse = await fetch('https://api.chapa.global/v2/payments/methods', {
-      headers: { Authorization: `Bearer ${chapaKey}` },
-    })
-    const methodsJson = await methodsResponse.json().catch(() => ({}))
+    let methodsResponse: Response
+    let methodsJson: Record<string, any>
+    try {
+      methodsResponse = await fetch('https://api.chapa.global/v2/payments/methods', {
+        headers: { Authorization: `Bearer ${chapaKey}` },
+      })
+      methodsJson = await methodsResponse.json().catch(() => ({}))
+    } catch {
+      await failHold('Could not reach Chapa to validate the selected payment method')
+      return json({ error: 'Chapa is temporarily unreachable. Your ticket reservation was released; please try again.' }, 503)
+    }
     const methods = Array.isArray(methodsJson?.data) ? methodsJson.data : []
     const selected = methods.find((m: Record<string, any>) =>
       m.slug === body.payment_method && m.can_process_payments === true &&
@@ -164,16 +171,30 @@ Deno.serve(async (req) => {
     if (eventError) console.error('Payment attempt audit event insert failed', eventError.message)
   }
 
-  const chapaResponse = await fetch('https://api.chapa.global/v2/payments/hosted', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${chapaKey}`,
-      'Content-Type': 'application/json',
-      'Idempotency-Key': hold.merchant_reference,
-    },
-    body: JSON.stringify(checkoutBody),
-  })
-  const chapa = await chapaResponse.json().catch(() => ({}))
+  let chapaResponse: Response
+  let chapa: Record<string, any>
+  try {
+    chapaResponse = await fetch('https://api.chapa.global/v2/payments/hosted', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${chapaKey}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': hold.merchant_reference,
+      },
+      body: JSON.stringify(checkoutBody),
+    })
+    chapa = await chapaResponse.json().catch(() => ({}))
+  } catch {
+    await failHold('Chapa checkout initialization response was unavailable; order hold released for safety')
+    const { error: outcomeMetadataError } = await admin.from('payments').update({
+      failure_code: 'checkout_initialization_unknown',
+      failure_message: 'Chapa did not return a checkout response. The order hold was released; reconcile any late provider notification before issuing tickets.',
+      provider_payload: { checkout_initialization: 'unknown', merchant_reference: hold.merchant_reference },
+      updated_at: new Date().toISOString(),
+    }).eq('order_id', hold.order_id)
+    if (outcomeMetadataError) console.error('Could not persist uncertain checkout initialization metadata', outcomeMetadataError.message)
+    return json({ error: 'Chapa did not respond while creating checkout. Your ticket reservation was released; do not pay using an old checkout link. Please try again.' }, 503)
+  }
   const checkoutUrl = chapa?.data?.checkout_url
   if (!chapaResponse.ok || chapa?.status !== 'success' || !checkoutUrl) {
     await failHold(`Chapa initialization failed (${chapaResponse.status})`)
