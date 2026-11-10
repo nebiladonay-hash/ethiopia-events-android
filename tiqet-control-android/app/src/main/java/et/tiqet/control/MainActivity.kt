@@ -1202,7 +1202,14 @@ private fun FinanceScreen(
     val summary = finance.optJSONObject("summary") ?: JSONObject()
     val payments = finance.optJSONArray("recent_payments") ?: JSONArray()
     val refunds = finance.optJSONArray("refund_alerts") ?: JSONArray()
+    val individualRefunds = refundsDashboard.optJSONArray("refunds") ?: JSONArray()
+    val refundSummary = refundsDashboard.optJSONObject("summary") ?: JSONObject()
     val platformPayouts = finance.optJSONArray("platform_payouts") ?: JSONArray()
+    var selectedPayment by remember { mutableStateOf<JSONObject?>(null) }
+    var amountEtb by remember { mutableStateOf("") }
+    var reason by remember { mutableStateOf("") }
+    var idempotencyKey by remember { mutableStateOf("") }
+    var formError by remember { mutableStateOf<String?>(null) }
     val organiserPayouts = finance.optJSONArray("organiser_payout_requests") ?: JSONArray()
 
     fun money(value: Double): String = "ETB " + String.format(Locale.US, "%,.2f", value)
@@ -1216,8 +1223,8 @@ private fun FinanceScreen(
     ) {
         item {
             Column {
-                Text("Financial monitoring",color=Ink,fontSize=23.sp,fontWeight=FontWeight.Bold)
-                Text("Read-only overview of verified payments, refunds and payout queues.",color=Muted,fontSize=11.sp,lineHeight=16.sp)
+                Text("Financial operations",color=Ink,fontSize=23.sp,fontWeight=FontWeight.Bold)
+                Text("Verified payments, refund requests and settlement review.",color=Muted,fontSize=11.sp,lineHeight=16.sp)
                 if (busy) {
                     Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(Modifier.fillMaxWidth(),color=Teal)
@@ -1234,6 +1241,12 @@ private fun FinanceScreen(
             Row(horizontalArrangement=Arrangement.spacedBy(9.dp)) {
                 FinanceMetric("PAYMENT REVIEW",summary.optInt("payment_reviews").toString(),Accent,Modifier.weight(1f))
                 FinanceMetric("REFUNDS TO REVIEW",summary.optInt("refunds_needing_review").toString(),Danger,Modifier.weight(1f))
+            }
+        }
+        item {
+            Row(horizontalArrangement=Arrangement.spacedBy(9.dp)) {
+                FinanceMetric("OPEN REFUND REQUESTS",refundSummary.optInt("open").toString(),Accent,Modifier.weight(1f))
+                FinanceMetric("VERIFIED REFUNDS",refundSummary.optInt("succeeded").toString(),Teal,Modifier.weight(1f))
             }
         }
         item {
@@ -1255,6 +1268,70 @@ private fun FinanceScreen(
                     Text("${row.optString("provider")} · ${row.optString("payment_method")}",color=Teal,fontSize=10.sp)
                     Text("Order: ${row.optString("order_status")} · ${row.optString("buyer_email")}",color=Muted,fontSize=10.sp)
                     Text(row.optString("merchant_reference"),color=Muted,fontSize=9.sp)
+                    Text(row.optString("created_at").replace("T"," ").take(16),color=Muted,fontSize=9.sp)
+                    if (row.optString("provider") == "chapa" &&
+                        row.optString("status") in listOf("succeeded","partially_refunded")) {
+                        Spacer(Modifier.height(5.dp))
+                        OutlinedButton(
+                            onClick = {
+                                selectedPayment = row
+                                amountEtb = ""
+                                reason = ""
+                                formError = null
+                                idempotencyKey = java.util.UUID.randomUUID().toString()
+                            },
+                            enabled = !busy,
+                            shape = RoundedCornerShape(11.dp),
+                            contentPadding = PaddingValues(horizontal=12.dp,vertical=7.dp)
+                        ) {
+                            Text("Request refund",fontSize=11.sp)
+                        }
+                    }
+                }
+            }
+        }
+        item { FinanceSectionTitle("Individual refund requests",individualRefunds.length()) }
+        if (individualRefunds.length() == 0) {
+            item { Text("No individual refund requests recorded.",color=Muted,fontSize=11.sp) }
+        } else {
+            items((0 until individualRefunds.length()).mapNotNull{individualRefunds.optJSONObject(it)},key={it.optString("id")}) { row ->
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(CardWhite).padding(13.dp)) {
+                    Row(verticalAlignment=Alignment.CenterVertically) {
+                        Text(amount(row),color=Ink,fontSize=15.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
+                        StatusPill(row.optString("status"))
+                    }
+                    Text(row.optString("reason"),color=Muted,fontSize=10.sp)
+                    Text("Payment: \${row.optString("payment_merchant_reference")}",color=Muted,fontSize=9.sp)
+                    Text("Refund ref: \${row.optString("provider_reference").ifBlank { row.optString("merchant_reference") }}",color=Muted,fontSize=9.sp)
+                    if (row.optString("status") in listOf("requested","pending") &&
+                        row.optString("provider_reference").isNotBlank()) {
+                        TextButton(
+                            onClick = { onVerifyRefund(row.optString("id")) },
+                            enabled = !busy,
+                            contentPadding = PaddingValues(horizontal=4.dp,vertical=3.dp)
+                        ) { Text("Verify with Chapa",color=Teal,fontSize=11.sp) }
+                    } else if (row.optString("status") == "requested" &&
+                        row.optString("provider_reference").isBlank() &&
+                        row.optString("idempotency_key").isNotBlank()) {
+                        TextButton(
+                            onClick = {
+                                val fullRefund = row.optBoolean("request_full_refund")
+                                val partialAmount = if (fullRefund || row.isNull("requested_amount_minor")) null
+                                    else row.optLong("requested_amount_minor")
+                                onRequestRefund(
+                                    row.optString("payment_id"),
+                                    partialAmount,
+                                    row.optString("reason"),
+                                    row.optString("idempotency_key")
+                                )
+                            },
+                            enabled = !busy,
+                            contentPadding = PaddingValues(horizontal=4.dp,vertical=3.dp)
+                        ) { Text("Retry same request",color=Teal,fontSize=11.sp) }
+                    }
+                    if (row.optString("error_message").isNotBlank()) {
+                        Text(row.optString("error_message"),color=Danger,fontSize=10.sp)
+                    }
                     Text(row.optString("created_at").replace("T"," ").take(16),color=Muted,fontSize=9.sp)
                 }
             }
@@ -1303,10 +1380,79 @@ private fun FinanceScreen(
         }
         item {
             Text(
-                "Read-only monitoring. This screen does not initiate refunds, approve withdrawals or move money.",
+                "Verified refunds remain in finance review until ticket entitlement and organiser/platform settlement are reconciled. This screen does not issue automatic organiser payouts.",
                 color=Muted,fontSize=10.sp,lineHeight=15.sp
             )
         }
+    }
+
+    if (selectedPayment != null) {
+        val payment = selectedPayment!!
+        AlertDialog(
+            onDismissRequest = { if (!busy) selectedPayment = null },
+            title = { Text("Request Chapa refund",color=Ink,fontWeight=FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement=Arrangement.spacedBy(9.dp)) {
+                    Text(
+                        "Payment \${payment.optString("merchant_reference")} · \${amount(payment)}",
+                        color=Muted,fontSize=11.sp
+                    )
+                    OutlinedTextField(
+                        value=amountEtb,
+                        onValueChange={amountEtb=it;formError=null},
+                        modifier=Modifier.fillMaxWidth(),
+                        label={Text("Refund amount in ETB")},
+                        placeholder={Text("Leave blank for full refund")},
+                        singleLine=true,
+                        keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal)
+                    )
+                    OutlinedTextField(
+                        value=reason,
+                        onValueChange={reason=it;formError=null},
+                        modifier=Modifier.fillMaxWidth(),
+                        label={Text("Reason for refund")},
+                        minLines=2,
+                        maxLines=3
+                    )
+                    Text(
+                        "Chapa must confirm this refund. TIQET will then keep the order in finance review until ticket and settlement reconciliation is complete.",
+                        color=Muted,fontSize=10.sp,lineHeight=14.sp
+                    )
+                    if (formError != null) Text(formError!!,color=Danger,fontSize=10.sp)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cleanedReason = reason.trim()
+                        val amountMinor = if (amountEtb.isBlank()) null else runCatching {
+                            java.math.BigDecimal(amountEtb.trim())
+                                .movePointRight(2)
+                                .setScale(0, java.math.RoundingMode.UNNECESSARY)
+                                .longValueExact()
+                        }.getOrNull()
+                        val invalidAmount = amountEtb.isNotBlank() && (amountMinor == null || amountMinor < 100)
+                        if (cleanedReason.isBlank() || cleanedReason.length > 400) {
+                            formError = "Enter a reason from 1 to 400 characters."
+                        } else if (invalidAmount) {
+                            formError = "Enter a valid ETB amount with up to two decimal places (minimum ETB 1.00)."
+                        } else if (idempotencyKey.isBlank()) {
+                            formError = "A safe request key could not be created. Close and reopen this form."
+                        } else {
+                            onRequestRefund(payment.optString("payment_id"),amountMinor,cleanedReason,idempotencyKey)
+                            selectedPayment = null
+                        }
+                    },
+                    enabled=!busy,
+                    colors=ButtonDefaults.buttonColors(containerColor=Ink)
+                ) { Text("Send refund request") }
+            },
+            dismissButton = {
+                TextButton(onClick={selectedPayment=null},enabled=!busy) { Text("Cancel",color=Muted) }
+            },
+            shape=RoundedCornerShape(20.dp),
+            containerColor=CardWhite
+        )
     }
 }
 
