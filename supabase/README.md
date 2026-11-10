@@ -26,6 +26,7 @@ The existing Tiqet core schema was already present before this connected product
 - `20261110051948_tiqet_control_staff_roles_and_review_workflow`
 - `20261110052005_tiqet_control_staff_directory_and_audit_access`
 - `20261110052251_tiqet_control_user_search`
+- `20261110053100_tiqet_control_finance_monitoring`
 
 The remote schema contains 24 public tables; all observed public tables have RLS enabled. Internal accounting/provider/webhook tables are service-role-only. The production migration history does **not** yet represent the older baseline schema files in the V7.1 archive. Do not run `supabase db push` from the archive until the baseline is reconciled. The GitHub backend workflow is currently a package/source verification workflow only and does not push schema changes.
 
@@ -143,7 +144,7 @@ The separate Android companion source lives under `tiqet-control-android/` on th
 
 The initial Control build includes:
 - Email/password sign-in followed by a server-side `get_tiqet_control_overview` authorization check.
-- Role-aware Overview, pending Organiser Applications, pending Event Submissions, Staff Access (super-admin only), and Activity Log (admin only).
+- Role-aware Overview, pending Organiser Applications, pending Event Submissions, Staff Access (super-admin only), Activity Log (admin only), and Finance (admin only, read-only).
 - Organiser approve/reject/request-info actions.
 - Event approve/reject/request-changes actions.
 - Super-admin-only staff user lookup, role assignment and revocation.
@@ -155,4 +156,13 @@ Build workflow:
 - Workflow: `.github/workflows/build-tiqet-control.yml`
 - Artifact name: `tiqet-control-debug-apk`
 
-The current companion-app source is an initial functional control MVP. Payment/reconciliation dashboards, account suspension, user moderation, staff-device session management, encrypted local session persistence and release signing are not implemented yet. No APK should be considered validated until the current workflow run succeeds and the resulting artifact has been smoke-tested on a device.
+The current companion-app source is an initial functional control MVP. Account suspension and broader user moderation, staff-device session management, encrypted local session persistence and release signing are not implemented yet. The initial Finance tab is read-only; it does not initiate refunds or payouts. No APK should be considered validated until the current workflow run succeeds and the resulting artifact has been smoke-tested on a device.
+
+
+### Finance monitoring RPC
+
+- `get_tiqet_finance_dashboard(p_limit)` is restricted to authenticated Tiqet admins.
+- Returns aggregated paid-order/payment-review counts, gross/adjusted/net platform revenue, open payout counts, recent payment records, refund alerts, platform payout summaries and organiser payout request summaries.
+- Full bank account numbers and raw provider payloads are not returned. Platform payout destinations are masked to bank name and last four digits.
+- The Control app uses this endpoint for read-only financial monitoring. It does not initiate refunds, approve/execute payouts or move money.
+- A rollback-only SQL smoke test called the RPC as the bootstrapped super-admin; it returned the expected zero-value / empty result for the empty database.
