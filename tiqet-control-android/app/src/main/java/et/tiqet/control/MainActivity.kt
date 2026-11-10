@@ -462,6 +462,28 @@ private fun ControlWorkspace(
                             }
                         }
                     },
+                    onResolveOrganiserPayout = { requestId, status, providerReference, operatorNote ->
+                        scope.launch {
+                            busy = true
+                            error = null
+                            try {
+                                val result = api.resolveOrganiserPayout(
+                                    session, requestId, status, providerReference, operatorNote
+                                )
+                                notice = "Organiser payout request updated to ${result.optString("status", status)}. Settlement ledger and audit records were updated."
+                                finance = api.getFinanceDashboard(session)
+                                audit = api.getAuditLog(session)
+                            } catch (e: Exception) {
+                                error = e.message ?: "Could not update organiser payout request."
+                                try {
+                                    finance = api.getFinanceDashboard(session)
+                                    audit = api.getAuditLog(session)
+                                } catch (_: Exception) { }
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    },
                     onRequestRefund = { paymentId, amountMinor, reason, idempotencyKey ->
                         scope.launch {
                             busy = true
@@ -1244,6 +1266,7 @@ private fun FinanceScreen(
     payoutDestinations: JSONArray,
     onLoadPayoutDestinations: () -> Unit,
     onCreatePlatformPayout: (amountMinor: Long, bankSlug: String, bankName: String, accountName: String, accountNumber: String) -> Unit,
+    onResolveOrganiserPayout: (requestId: String, status: String, providerReference: String, operatorNote: String) -> Unit,
     onRequestRefund: (paymentId: String, amountMinor: Long?, reason: String, idempotencyKey: String) -> Unit,
     onVerifyRefund: (refundId: String) -> Unit,
     onRefresh: () -> Unit
@@ -1266,6 +1289,11 @@ private fun FinanceScreen(
     var selectedDestinationSlug by remember { mutableStateOf("") }
     var payoutMenuExpanded by remember { mutableStateOf(false) }
     var payoutFormError by remember { mutableStateOf<String?>(null) }
+    var selectedOrganiserPayout by remember { mutableStateOf<JSONObject?>(null) }
+    var organiserPayoutNextStatus by remember { mutableStateOf("") }
+    var organiserPayoutProviderReference by remember { mutableStateOf("") }
+    var organiserPayoutNote by remember { mutableStateOf("") }
+    var organiserPayoutFormError by remember { mutableStateOf<String?>(null) }
     val destinations = (0 until payoutDestinations.length()).mapNotNull { payoutDestinations.optJSONObject(it) }
     val selectedDestination = destinations.firstOrNull { it.optString("slug") == selectedDestinationSlug }
     val organiserPayouts = finance.optJSONArray("organiser_payout_requests") ?: JSONArray()
@@ -1461,12 +1489,101 @@ private fun FinanceScreen(
             item { Text("No organiser payout requests recorded.",color=Muted,fontSize=11.sp) }
         } else {
             items((0 until organiserPayouts.length()).mapNotNull{organiserPayouts.optJSONObject(it)},key={it.optString("id")}) { row ->
-                FinanceRecord(
-                    title=amount(row),
-                    subtitle="${row.optString("organisation_name")} · ${row.optString("provider")}",
-                    reference=row.optString("provider_reference"),
-                    status=row.optString("status")
-                )
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(CardWhite).padding(13.dp),
+                    verticalArrangement=Arrangement.spacedBy(5.dp)
+                ) {
+                    Row(verticalAlignment=Alignment.CenterVertically) {
+                        Text(amount(row),color=Ink,fontSize=15.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
+                        StatusPill(row.optString("status"))
+                    }
+                    Text("${row.optString("organisation_name")} · ${row.optString("provider")}",color=Muted,fontSize=10.sp)
+                    if (row.optString("provider_reference").isNotBlank()) {
+                        Text("Provider ref: ${row.optString("provider_reference")}",color=Muted,fontSize=9.sp)
+                    }
+                    Text(row.optString("operator_note"),color=Muted,fontSize=10.sp)
+                    val current = row.optString("status")
+                    Row(horizontalArrangement=Arrangement.spacedBy(5.dp)) {
+                        when (current) {
+                            "requested" -> {
+                                TextButton(
+                                    onClick = {
+                                        selectedOrganiserPayout=row
+                                        organiserPayoutNextStatus="approved"
+                                        organiserPayoutProviderReference=""
+                                        organiserPayoutNote=""
+                                        organiserPayoutFormError=null
+                                    },
+                                    enabled=!busy
+                                ) { Text("Approve",color=Teal,fontSize=10.sp) }
+                                TextButton(
+                                    onClick = {
+                                        selectedOrganiserPayout=row
+                                        organiserPayoutNextStatus="rejected"
+                                        organiserPayoutProviderReference=""
+                                        organiserPayoutNote=""
+                                        organiserPayoutFormError=null
+                                    },
+                                    enabled=!busy
+                                ) { Text("Reject",color=Danger,fontSize=10.sp) }
+                            }
+                            "approved" -> {
+                                TextButton(
+                                    onClick = {
+                                        selectedOrganiserPayout=row
+                                        organiserPayoutNextStatus="processing"
+                                        organiserPayoutProviderReference=""
+                                        organiserPayoutNote=""
+                                        organiserPayoutFormError=null
+                                    },
+                                    enabled=!busy
+                                ) { Text("Start processing",color=Teal,fontSize=10.sp) }
+                                TextButton(
+                                    onClick = {
+                                        selectedOrganiserPayout=row
+                                        organiserPayoutNextStatus="rejected"
+                                        organiserPayoutProviderReference=""
+                                        organiserPayoutNote=""
+                                        organiserPayoutFormError=null
+                                    },
+                                    enabled=!busy
+                                ) { Text("Reject",color=Danger,fontSize=10.sp) }
+                            }
+                            "processing" -> {
+                                TextButton(
+                                    onClick = {
+                                        selectedOrganiserPayout=row
+                                        organiserPayoutNextStatus="paid"
+                                        organiserPayoutProviderReference=""
+                                        organiserPayoutNote=""
+                                        organiserPayoutFormError=null
+                                    },
+                                    enabled=!busy
+                                ) { Text("Confirm paid",color=Teal,fontSize=10.sp) }
+                                TextButton(
+                                    onClick = {
+                                        selectedOrganiserPayout=row
+                                        organiserPayoutNextStatus="failed"
+                                        organiserPayoutProviderReference=""
+                                        organiserPayoutNote=""
+                                        organiserPayoutFormError=null
+                                    },
+                                    enabled=!busy
+                                ) { Text("Mark failed",color=Danger,fontSize=10.sp) }
+                            }
+                            "paid" -> TextButton(
+                                onClick = {
+                                    selectedOrganiserPayout=row
+                                    organiserPayoutNextStatus="reversed"
+                                    organiserPayoutProviderReference=""
+                                    organiserPayoutNote=""
+                                    organiserPayoutFormError=null
+                                },
+                                enabled=!busy
+                            ) { Text("Record reversal",color=Danger,fontSize=10.sp) }
+                        }
+                    }
+                }
             }
         }
         item {
@@ -1593,6 +1710,97 @@ private fun FinanceScreen(
                     onClick={showPayoutDialog=false;payoutAccountNumber=""},
                     enabled=!busy
                 ) { Text("Cancel",color=Muted) }
+            },
+            shape=RoundedCornerShape(20.dp),
+            containerColor=CardWhite
+        )
+    }
+
+    if (selectedOrganiserPayout != null) {
+        val payout = selectedOrganiserPayout!!
+        val finalAction = organiserPayoutNextStatus in listOf("paid", "reversed")
+        AlertDialog(
+            onDismissRequest = { if (!busy) selectedOrganiserPayout = null },
+            title = {
+                Text(
+                    when (organiserPayoutNextStatus) {
+                        "approved" -> "Approve payout request"
+                        "rejected" -> "Reject payout request"
+                        "processing" -> "Start payout processing"
+                        "paid" -> "Confirm organiser payout"
+                        "failed" -> "Record payout failure"
+                        "reversed" -> "Record payout reversal"
+                        else -> "Update payout request"
+                    },
+                    color=Ink,fontWeight=FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement=Arrangement.spacedBy(9.dp)) {
+                    Text(
+                        "${payout.optString("organisation_name")} · ${amount(payout)}",
+                        color=Muted,fontSize=11.sp
+                    )
+                    if (finalAction) {
+                        OutlinedTextField(
+                            value=organiserPayoutProviderReference,
+                            onValueChange={organiserPayoutProviderReference=it;organiserPayoutFormError=null},
+                            modifier=Modifier.fillMaxWidth(),
+                            label={Text("Provider transaction reference")},
+                            singleLine=true
+                        )
+                    }
+                    OutlinedTextField(
+                        value=organiserPayoutNote,
+                        onValueChange={organiserPayoutNote=it;organiserPayoutFormError=null},
+                        modifier=Modifier.fillMaxWidth(),
+                        label={Text("Operator note / evidence")},
+                        minLines=2,
+                        maxLines=4
+                    )
+                    if (organiserPayoutNextStatus == "paid") {
+                        Text(
+                            "Only confirm payment after the provider or bank transfer is independently confirmed. This action posts the payout debit to the organiser settlement ledger.",
+                            color=Danger,fontSize=10.sp,lineHeight=14.sp
+                        )
+                    } else if (organiserPayoutNextStatus == "reversed") {
+                        Text(
+                            "Only record a reversal after the provider confirms that the previously paid transfer was reversed. This restores the settlement balance.",
+                            color=Danger,fontSize=10.sp,lineHeight=14.sp
+                        )
+                    }
+                    if (organiserPayoutFormError != null) {
+                        Text(organiserPayoutFormError!!,color=Danger,fontSize=10.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val note=organiserPayoutNote.trim()
+                        val reference=organiserPayoutProviderReference.trim()
+                        when {
+                            note.length !in 5..500 -> organiserPayoutFormError="Enter a note between 5 and 500 characters."
+                            finalAction && reference.length < 3 -> organiserPayoutFormError="Enter the provider transaction reference."
+                            else -> {
+                                onResolveOrganiserPayout(
+                                    payout.optString("id"),
+                                    organiserPayoutNextStatus,
+                                    reference,
+                                    note
+                                )
+                                selectedOrganiserPayout=null
+                            }
+                        }
+                    },
+                    enabled=!busy,
+                    colors=ButtonDefaults.buttonColors(containerColor=Ink)
+                ) { Text("Confirm") }
+            },
+            dismissButton = {
+                TextButton(onClick={selectedOrganiserPayout=null},enabled=!busy) {
+                    Text("Cancel",color=Muted)
+                }
             },
             shape=RoundedCornerShape(20.dp),
             containerColor=CardWhite
