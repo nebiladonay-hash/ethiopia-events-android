@@ -232,6 +232,7 @@ private fun ControlWorkspace(
     var organisers by remember { mutableStateOf(JSONArray()) }
     var verifiedOrganisers by remember { mutableStateOf(JSONArray()) }
     var events by remember { mutableStateOf(JSONArray()) }
+    var publishedEvents by remember { mutableStateOf(JSONArray()) }
     var staff by remember { mutableStateOf(JSONArray()) }
     var audit by remember { mutableStateOf(JSONArray()) }
     var finance by remember { mutableStateOf(JSONObject()) }
@@ -252,6 +253,7 @@ private fun ControlWorkspace(
                 overview = api.getOverview(session)
                 events = api.getPendingEvents(session)
                 if (overview.optBoolean("admin_access")) {
+                    publishedEvents = api.getPublishedEventsForReview(session)
                     organisers = api.getOrganisers(session)
                     verifiedOrganisers = api.getVerifiedOrganisers(session)
                     audit = api.getAuditLog(session)
@@ -388,6 +390,7 @@ private fun ControlWorkspace(
                 )
                 ControlTab.EVENTS -> EventQueueScreen(
                     items = events,
+                    publishedItems = publishedEvents,
                     busy = busy,
                     onReview = { id, decision, notes ->
                         scope.launch {
@@ -397,6 +400,17 @@ private fun ControlWorkspace(
                                 notice = if (decision == "approve") "Event approved and published." else "Event returned to the organiser for changes."
                                 refresh()
                             } catch (e: Exception) { error = e.message ?: "Could not review event." }
+                            finally { busy = false }
+                        }
+                    },
+                    onFlagPublished = { id, reason ->
+                        scope.launch {
+                            busy = true
+                            try {
+                                api.flagPublishedEvent(session,id,reason)
+                                notice = "Published event removed from public listings and sent to moderator review."
+                                refresh()
+                            } catch (e: Exception) { error = e.message ?: "Could not flag event." }
                             finally { busy = false }
                         }
                     }
@@ -705,41 +719,115 @@ private fun OrganiserQueueScreen(
 @Composable
 private fun EventQueueScreen(
     items: JSONArray,
+    publishedItems: JSONArray,
     busy: Boolean,
-    onReview: (String, String, String) -> Unit
+    onReview: (String, String, String) -> Unit,
+    onFlagPublished: (String,String) -> Unit
 ) {
     var notes by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().padding(horizontal=16.dp)) {
-        ScreenHeading("Event submissions", "Check the listing before it becomes visible to customers.")
-        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color=Teal)
-        OutlinedTextField(
-            value=notes, onValueChange={notes=it},
-            modifier=Modifier.fillMaxWidth(),
-            label={Text("Review note (optional)")},
-            shape=RoundedCornerShape(13.dp), minLines=1, maxLines=3
-        )
-        Spacer(Modifier.height(10.dp))
-        if (items.length()==0) {
-            EmptyState("No pending events", "New submissions from verified organisers will appear here.")
+    var flagReason by remember { mutableStateOf("") }
+    var selectedPublishedEvent by remember { mutableStateOf<JSONObject?>(null) }
+    var showFlagConfirm by remember { mutableStateOf(false) }
+
+    LazyColumn(
+        modifier=Modifier.fillMaxSize().padding(horizontal=16.dp),
+        verticalArrangement=Arrangement.spacedBy(11.dp),
+        contentPadding=PaddingValues(bottom=28.dp)
+    ) {
+        item {
+            ScreenHeading("Event moderation","Review new submissions and investigate published listings reported or flagged for review.")
+        }
+        item {
+            OutlinedTextField(
+                value=notes,onValueChange={notes=it},
+                modifier=Modifier.fillMaxWidth(),
+                label={Text("Review note (optional)")},
+                shape=RoundedCornerShape(13.dp),minLines=1,maxLines=3
+            )
+        }
+        item {
+            Text("PENDING SUBMISSIONS · ${items.length()}",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
+        }
+        if(items.length()==0) {
+            item { EmptyState("No pending event submissions","New events from manual-review organisers appear here.") }
         } else {
-            LazyColumn(verticalArrangement=Arrangement.spacedBy(11.dp), contentPadding=PaddingValues(bottom=24.dp)) {
-                items((0 until items.length()).mapNotNull { items.optJSONObject(it) }, key={it.optString("id")}) { event ->
-                    ReviewCard(
-                        title=event.optString("title","Untitled event"),
-                        subtitle=event.optString("category"),
-                        meta=listOf(event.optString("starts_at").replace("T"," ").take(16),event.optString("venue_name"),event.optString("city")).filter{it.isNotBlank()}.joinToString(" · "),
-                        note=event.optString("description"),
-                        busy=busy,
-                        actions=listOf(
-                            ReviewAction("Request changes","request_changes",Muted),
-                            ReviewAction("Reject","reject",Danger),
-                            ReviewAction("Approve & publish","approve",Teal)
-                        ),
-                        onAction={ decision -> onReview(event.optString("id"),decision,notes.trim()) }
-                    )
+            items((0 until items.length()).mapNotNull{items.optJSONObject(it)},key={it.optString("id")}) { event ->
+                ReviewCard(
+                    title=event.optString("title","Untitled event"),
+                    subtitle=event.optString("category"),
+                    meta=listOf(event.optString("starts_at").replace("T"," ").take(16),event.optString("venue_name"),event.optString("city"))
+                        .filter{it.isNotBlank()}.joinToString(" · "),
+                    note=event.optString("description"),
+                    busy=busy,
+                    actions=listOf(
+                        ReviewAction("Request changes","request_changes",Muted),
+                        ReviewAction("Reject","reject",Danger),
+                        ReviewAction("Approve & publish","approve",Teal)
+                    ),
+                    onAction={decision->onReview(event.optString("id"),decision,notes.trim())}
+                )
+            }
+        }
+        item {
+            Spacer(Modifier.height(8.dp))
+            Text("PUBLISHED EVENTS · ${publishedItems.length()}",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
+            Text("Flagging removes a published event from public listings and sends it back to the review queue.",color=Muted,fontSize=10.sp,lineHeight=15.sp)
+        }
+        if(publishedItems.length()==0) {
+            item { EmptyState("No published events","Published events will appear here for ongoing moderation.") }
+        } else {
+            items((0 until publishedItems.length()).mapNotNull{publishedItems.optJSONObject(it)},key={"published-${it.optString("id")}"}) { event ->
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(CardWhite).padding(14.dp)) {
+                    Text(event.optString("title","Untitled event"),color=Ink,fontSize=13.sp,fontWeight=FontWeight.Bold)
+                    Text("${event.optString("organisation_name")} · ${event.optString("category")}",color=Teal,fontSize=10.sp)
+                    Text(listOf(event.optString("starts_at").replace("T"," ").take(16),event.optString("venue_name"),event.optString("city"))
+                        .filter{it.isNotBlank()}.joinToString(" · "),color=Muted,fontSize=9.sp)
+                    if(event.optString("description").isNotBlank()) {
+                        Text(event.optString("description"),color=Ink,fontSize=11.sp,lineHeight=15.sp,maxLines=3,overflow=TextOverflow.Ellipsis)
+                    }
+                    Spacer(Modifier.height(7.dp))
+                    OutlinedButton(
+                        onClick={selectedPublishedEvent=event;showFlagConfirm=true},
+                        enabled=!busy,
+                        modifier=Modifier.fillMaxWidth(),
+                        shape=RoundedCornerShape(11.dp),
+                        colors=ButtonDefaults.outlinedButtonColors(contentColor=Danger)
+                    ) { Text("Flag for moderator review",fontSize=10.sp) }
                 }
             }
         }
+    }
+
+    val flaggedEvent=selectedPublishedEvent
+    if(showFlagConfirm && flaggedEvent!=null) {
+        AlertDialog(
+            onDismissRequest={showFlagConfirm=false},
+            title={Text("Flag published event?")},
+            text={
+                Column {
+                    Text("The event will be removed from public listings and returned to the review queue.",fontSize=12.sp,lineHeight=17.sp)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value=flagReason,onValueChange={flagReason=it},
+                        modifier=Modifier.fillMaxWidth(),
+                        label={Text("Reason (required)")},
+                        minLines=2,maxLines=4,shape=RoundedCornerShape(12.dp)
+                    )
+                }
+            },
+            confirmButton={
+                Button(
+                    onClick={
+                        showFlagConfirm=false
+                        onFlagPublished(flaggedEvent.optString("id"),flagReason.trim())
+                        flagReason=""
+                    },
+                    enabled=flagReason.trim().length in 5..1000,
+                    colors=ButtonDefaults.buttonColors(containerColor=Danger)
+                ) { Text("Flag event") }
+            },
+            dismissButton={TextButton(onClick={showFlagConfirm=false}) { Text("Cancel") }}
+        )
     }
 }
 
