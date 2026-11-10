@@ -8,14 +8,19 @@ function constantTimeEqual(a: string, b: string): boolean {
   for (let i = 0; i < 64; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
   return diff === 0
 }
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(buffer).set(bytes)
+  return buffer
+}
 async function hmacSha256(secret: string, rawBytes: Uint8Array): Promise<string> {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret),
     { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-  const signature = await crypto.subtle.sign('HMAC', key, rawBytes)
+  const signature = await crypto.subtle.sign('HMAC', key, toArrayBuffer(rawBytes))
   return hex(new Uint8Array(signature))
 }
 async function sha256(rawBytes: Uint8Array): Promise<string> {
-  return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', rawBytes)))
+  return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', toArrayBuffer(rawBytes))))
 }
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
