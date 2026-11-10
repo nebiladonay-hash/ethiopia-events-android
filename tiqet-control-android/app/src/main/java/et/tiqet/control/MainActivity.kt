@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -1492,7 +1494,7 @@ private fun FinanceScreen(
             title = { Text("Withdraw platform revenue",color=Ink,fontWeight=FontWeight.Bold) },
             text = {
                 Column(
-                    modifier = Modifier.heightIn(max=480.dp).verticalScroll(androidx.compose.ui.unit.Constraints.Infinity.let { androidx.compose.foundation.rememberScrollState() }),
+                    modifier = Modifier.heightIn(max=480.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(9.dp)
                 ) {
                     Text(
