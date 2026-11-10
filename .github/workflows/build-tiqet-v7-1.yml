@@ -88,11 +88,19 @@ jobs:
           set -euo pipefail
           base64 --decode "$GITHUB_WORKSPACE/patches/v7-2-minimal-ui.patch.gz.b64" \
             | gzip -dc \
-            | patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch --fuzz=8 || true
-          if [ -f "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt.rej" ]; then
-            echo "Remaining branding hunk context:"
-            cat "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt.rej"
-            exit 1
+            | patch -d "$RUNNER_TEMP/tiqet-v7" -p0 --forward --batch --fuzz=4 || true
+          MAIN_ACTIVITY="$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
+          REJECTS="$MAIN_ACTIVITY.rej"
+          if [ -f "$REJECTS" ]; then
+            # One branding hunk replaces the original Chapa checkout call. The
+            # payment-method UI patch already replaced that exact line with the
+            # method-aware call, so accept only this precise, already-applied
+            # overlap; all other rejects remain fatal.
+            grep -q -- '-.*api.createChapaCheckout(ticketTypeId, ticketCount)' "$REJECTS"
+            grep -q -- '+.*selectedPaymentMethod.takeIf' "$REJECTS"
+            grep -q 'api.createChapaCheckout(ticketTypeId, ticketCount, selectedPaymentMethod.takeIf' "$MAIN_ACTIVITY"
+            test "$(grep -c '^@@' "$REJECTS")" -eq 1
+            rm "$REJECTS"
           fi
           # Vector launcher resources replace the old raster icons, preventing Android from selecting stale density-specific bitmaps.
           for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
