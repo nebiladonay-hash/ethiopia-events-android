@@ -1,5 +1,5 @@
 -- Disposable PostgreSQL test schema.
--- Column names and relevant types mirror the live TIQET payments/orders schema.
+-- Column names and relevant types mirror the live TIQET payments/orders/payouts schema.
 -- This file is only used by the GitHub Actions PostgreSQL service, never production.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -43,6 +43,7 @@ RETURNS jsonb
 LANGUAGE sql
 STABLE
 AS 'SELECT jsonb_build_object(''sub'', nullif(current_setting(''request.jwt.claim.sub'', true), ''''), ''role'', nullif(current_setting(''request.jwt.claim.role'', true), ''''))';
+
 CREATE TYPE public.order_status AS ENUM (
   'payment_pending',
   'paid',
@@ -80,23 +81,7 @@ CREATE TABLE public.platform_payouts (
   bank_slug text NOT NULL,
   bank_name text NOT NULL,
   account_name text NOT NULL,
-  account_last4 text NOT NULL CHECK (account_last4 ~ '^[0-9]{4}
--- Minimal test-only administrator predicate. A non-null authenticated user is
--- considered an administrator in this isolated database.
-CREATE OR REPLACE FUNCTION public.is_tiqet_admin()
-RETURNS boolean
-LANGUAGE sql
-STABLE
-AS $$
-  SELECT auth.uid() IS NOT NULL
-$$;
-
-GRANT USAGE ON SCHEMA public, auth TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION auth.role() TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION auth.jwt() TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.is_tiqet_admin() TO anon, authenticated, service_role;
-),
+  account_last4 text NOT NULL CHECK (account_last4 ~ '^[0-9]{4}$'),
   merchant_reference text NOT NULL UNIQUE,
   provider_reference text,
   provider_service_fee_minor bigint NOT NULL DEFAULT 0 CHECK (provider_service_fee_minor >= 0),
