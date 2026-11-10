@@ -237,6 +237,7 @@ private fun ControlWorkspace(
     var audit by remember { mutableStateOf(JSONArray()) }
     var finance by remember { mutableStateOf(JSONObject()) }
     var refundsDashboard by remember { mutableStateOf(JSONObject()) }
+    var payoutDestinations by remember { mutableStateOf(JSONArray()) }
     var selectedTab by remember { mutableStateOf(ControlTab.OVERVIEW) }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -430,6 +431,35 @@ private fun ControlWorkspace(
                     finance = finance,
                     refundsDashboard = refundsDashboard,
                     busy = busy,
+                    isPlatformOwner = session.isPlatformOwner,
+                    payoutDestinations = payoutDestinations,
+                    onLoadPayoutDestinations = {
+                        scope.launch {
+                            try {
+                                payoutDestinations = api.getChapaPayoutDestinations(session)
+                            } catch (e: Exception) {
+                                error = e.message ?: "Could not load Chapa payout destinations."
+                            }
+                        }
+                    },
+                    onCreatePlatformPayout = { amountMinor, bankSlug, bankName, accountName, accountNumber ->
+                        scope.launch {
+                            busy = true
+                            error = null
+                            try {
+                                val result = api.createPlatformPayout(
+                                    session, amountMinor, bankSlug, bankName, accountName, accountNumber
+                                )
+                                notice = "Platform withdrawal recorded with Chapa status ${result.optString("status", "pending")}. It remains under reconciliation until final confirmation."
+                                finance = api.getFinanceDashboard(session)
+                            } catch (e: Exception) {
+                                error = e.message ?: "Could not submit the platform withdrawal."
+                                try { finance = api.getFinanceDashboard(session) } catch (_: Exception) { }
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    },
                     onRequestRefund = { paymentId, amountMinor, reason, idempotencyKey ->
                         scope.launch {
                             busy = true
