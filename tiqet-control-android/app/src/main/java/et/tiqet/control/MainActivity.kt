@@ -230,6 +230,7 @@ private fun ControlWorkspace(
 ) {
     var overview by remember { mutableStateOf(JSONObject()) }
     var organisers by remember { mutableStateOf(JSONArray()) }
+    var verifiedOrganisers by remember { mutableStateOf(JSONArray()) }
     var events by remember { mutableStateOf(JSONArray()) }
     var staff by remember { mutableStateOf(JSONArray()) }
     var audit by remember { mutableStateOf(JSONArray()) }
@@ -252,6 +253,7 @@ private fun ControlWorkspace(
                 events = api.getPendingEvents(session)
                 if (overview.optBoolean("admin_access")) {
                     organisers = api.getOrganisers(session)
+                    verifiedOrganisers = api.getVerifiedOrganisers(session)
                     audit = api.getAuditLog(session)
                     finance = api.getFinanceDashboard(session)
                 }
@@ -355,6 +357,7 @@ private fun ControlWorkspace(
                 )
                 ControlTab.ORGANISERS -> OrganiserQueueScreen(
                     items = organisers,
+                    verifiedItems = verifiedOrganisers,
                     busy = busy,
                     onReview = { id, decision, notes ->
                         scope.launch {
@@ -362,12 +365,23 @@ private fun ControlWorkspace(
                             try {
                                 api.reviewOrganiser(session, id, decision, notes)
                                 notice = when (decision) {
-                                    "approve" -> "Organiser approved. Their event publishing access is now enabled."
+                                    "approve" -> "Organiser approved. You can now choose whether to trust them for automatic publishing."
                                     "reject" -> "Organiser application rejected."
                                     else -> "Information request recorded."
                                 }
                                 refresh()
                             } catch (e: Exception) { error = e.message ?: "Could not review organiser." }
+                            finally { busy = false }
+                        }
+                    },
+                    onAutoPublish = { id, enabled, reason ->
+                        scope.launch {
+                            busy = true
+                            try {
+                                api.setOrganiserAutoPublish(session,id,enabled,reason)
+                                notice = if(enabled) "Trusted organiser auto-publishing enabled." else "Automatic publishing disabled; future events return to review."
+                                refresh()
+                            } catch (e: Exception) { error = e.message ?: "Could not update organiser publishing policy." }
                             finally { busy = false }
                         }
                     }
@@ -546,41 +560,145 @@ private fun QueueShortcut(title: String, subtitle: String, onClick: () -> Unit) 
 @Composable
 private fun OrganiserQueueScreen(
     items: JSONArray,
+    verifiedItems: JSONArray,
     busy: Boolean,
-    onReview: (String, String, String) -> Unit
+    onReview: (String, String, String) -> Unit,
+    onAutoPublish: (String, Boolean, String) -> Unit
 ) {
     var notes by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().padding(horizontal=16.dp)) {
-        ScreenHeading("Organiser applications", "Verify the people and businesses allowed to sell tickets.")
-        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color=Teal)
-        OutlinedTextField(
-            value=notes, onValueChange={notes=it},
-            modifier=Modifier.fillMaxWidth(),
-            label={Text("Reviewer note (optional)")},
-            shape=RoundedCornerShape(13.dp), minLines=1, maxLines=3
-        )
-        Spacer(Modifier.height(10.dp))
-        if (items.length()==0) {
-            EmptyState("No pending organiser applications", "New applications will appear here.")
+    var policyReason by remember { mutableStateOf("") }
+    var selectedOrg by remember { mutableStateOf<JSONObject?>(null) }
+    var selectedTrustEnabled by remember { mutableStateOf(false) }
+    var showTrustConfirm by remember { mutableStateOf(false) }
+
+    LazyColumn(
+        modifier=Modifier.fillMaxSize().padding(horizontal=16.dp),
+        verticalArrangement=Arrangement.spacedBy(11.dp),
+        contentPadding=PaddingValues(bottom=28.dp)
+    ) {
+        item {
+            ScreenHeading(
+                "Organiser applications",
+                "Verify organisers first. Trusted organisers can publish ordinary events without waiting for each event review."
+            )
+        }
+        item {
+            OutlinedTextField(
+                value=notes, onValueChange={notes=it},
+                modifier=Modifier.fillMaxWidth(),
+                label={Text("Review note (optional)")},
+                shape=RoundedCornerShape(13.dp), minLines=1, maxLines=3
+            )
+        }
+        item {
+            Text("PENDING APPLICATIONS · ${items.length()}",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
+        }
+        if(items.length()==0) {
+            item { EmptyState("No pending organiser applications","New applications will appear here.") }
         } else {
-            LazyColumn(verticalArrangement=Arrangement.spacedBy(11.dp), contentPadding=PaddingValues(bottom=24.dp)) {
-                items((0 until items.length()).mapNotNull { items.optJSONObject(it) }, key={it.optString("id")}) { org ->
-                    ReviewCard(
-                        title=org.optString("name","Organiser"),
-                        subtitle=org.optString("legal_name"),
-                        meta=listOf(org.optString("contact_phone"),org.optString("created_at").take(10)).filter{it.isNotBlank()}.joinToString(" · "),
-                        note=org.optString("verification_notes"),
-                        busy=busy,
-                        actions=listOf(
-                            ReviewAction("Request info","request_info",Muted),
-                            ReviewAction("Reject","reject",Danger),
-                            ReviewAction("Approve","approve",Teal)
-                        ),
-                        onAction={ decision -> onReview(org.optString("id"),decision,notes.trim()) }
+            items((0 until items.length()).mapNotNull{items.optJSONObject(it)},key={it.optString("id")}) { org ->
+                ReviewCard(
+                    title=org.optString("name","Organiser"),
+                    subtitle=org.optString("legal_name"),
+                    meta=listOf(org.optString("contact_phone"),org.optString("created_at").take(10))
+                        .filter{it.isNotBlank()}.joinToString(" · "),
+                    note=org.optString("verification_notes"),
+                    busy=busy,
+                    actions=listOf(
+                        ReviewAction("Request info","request_info",Muted),
+                        ReviewAction("Reject","reject",Danger),
+                        ReviewAction("Approve","approve",Teal)
+                    ),
+                    onAction={decision->onReview(org.optString("id"),decision,notes.trim())}
+                )
+            }
+        }
+        item {
+            Spacer(Modifier.height(8.dp))
+            Text("VERIFIED ORGANISERS · ${verifiedItems.length()}",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
+            Text(
+                "Auto-publishing is an explicit trust decision. Only verified organisers can receive it; flagged or rejected events still require human review.",
+                color=Muted,fontSize=10.sp,lineHeight=15.sp
+            )
+        }
+        if(verifiedItems.length()==0) {
+            item { EmptyState("No verified organisers yet","Approved organisers will appear here for trust management.") }
+        } else {
+            items((0 until verifiedItems.length()).mapNotNull{verifiedItems.optJSONObject(it)},key={"trusted-${it.optString("id")}"}) { org ->
+                val trusted=org.optBoolean("auto_publish_enabled")
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(CardWhite).padding(14.dp)
+                ) {
+                    Row(verticalAlignment=Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(org.optString("name","Organiser"),color=Ink,fontSize=13.sp,fontWeight=FontWeight.Bold)
+                            Text(org.optString("legal_name"),color=Muted,fontSize=10.sp)
+                            Text(org.optString("contact_phone"),color=Muted,fontSize=9.sp)
+                        }
+                        StatusPill(if(trusted) "auto publish" else "manual review")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        if(trusted)
+                            "New events from this organiser publish automatically after submission, unless a review flag is active."
+                        else
+                            "New events from this organiser enter the normal manual review queue.",
+                        color=Muted,fontSize=10.sp,lineHeight=15.sp
                     )
+                    Spacer(Modifier.height(7.dp))
+                    OutlinedButton(
+                        onClick={
+                            selectedOrg=org
+                            selectedTrustEnabled=!trusted
+                            showTrustConfirm=true
+                        },
+                        enabled=!busy,
+                        modifier=Modifier.fillMaxWidth(),
+                        shape=RoundedCornerShape(11.dp)
+                    ) {
+                        Text(if(trusted) "Turn off automatic publishing" else "Trust organiser · enable auto-publish")
+                    }
                 }
             }
         }
+    }
+
+    val org=selectedOrg
+    if(showTrustConfirm && org!=null) {
+        AlertDialog(
+            onDismissRequest={showTrustConfirm=false},
+            title={Text(if(selectedTrustEnabled) "Trust this organiser?" else "Return organiser to manual review?")},
+            text={
+                Column {
+                    Text(
+                        if(selectedTrustEnabled)
+                            "New unflagged events from ${org.optString("name")} will publish automatically. Event flags and unresolved rejections continue to require review."
+                        else
+                            "New events from ${org.optString("name")} will require moderator approval again.",
+                        fontSize=12.sp,lineHeight=17.sp
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value=policyReason,onValueChange={policyReason=it},
+                        modifier=Modifier.fillMaxWidth(),
+                        label={Text("Reason (required)")},
+                        minLines=2,maxLines=4,shape=RoundedCornerShape(12.dp)
+                    )
+                }
+            },
+            confirmButton={
+                Button(
+                    onClick={
+                        showTrustConfirm=false
+                        onAutoPublish(org.optString("id"),selectedTrustEnabled,policyReason.trim())
+                        policyReason=""
+                    },
+                    enabled=policyReason.trim().length in 5..500,
+                    colors=ButtonDefaults.buttonColors(containerColor=if(selectedTrustEnabled) Teal else Danger)
+                ) { Text(if(selectedTrustEnabled) "Trust organiser" else "Disable auto-publish") }
+            },
+            dismissButton={TextButton(onClick={showTrustConfirm=false}) { Text("Cancel") }}
+        )
     }
 }
 
