@@ -94,6 +94,39 @@ class SupabaseApi(
     suspend fun getFinanceDashboard(session: ControlSession, limit: Int = 25): JSONObject =
         rpc(session, "get_tiqet_finance_dashboard", JSONObject().put("p_limit", limit))
 
+    suspend fun getRefundsDashboard(session: ControlSession, limit: Int = 50): JSONObject =
+        rpc(session, "get_tiqet_refunds_dashboard", JSONObject().put("p_limit", limit))
+
+    suspend fun createChapaRefund(
+        session: ControlSession,
+        paymentId: String,
+        amountMinor: Long?,
+        reason: String,
+        idempotencyKey: String
+    ): JSONObject = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("payment_id", paymentId)
+            .put("reason", reason)
+            .put("idempotency_key", idempotencyKey)
+        if (amountMinor != null) body.put("amount_minor", amountMinor)
+        request(
+            method = "POST",
+            path = "/functions/v1/create-chapa-refund",
+            body = body,
+            session = session
+        )
+    }
+
+    suspend fun verifyChapaRefund(session: ControlSession, refundId: String): JSONObject =
+        withContext(Dispatchers.IO) {
+            request(
+                method = "POST",
+                path = "/functions/v1/verify-chapa-refund",
+                body = JSONObject().put("refund_id", refundId),
+                session = session
+            )
+        }
+
     suspend fun searchUsers(session: ControlSession, query: String): JSONArray {
         val result = rpc(session, "search_tiqet_users", JSONObject().put("p_query", query).put("p_limit", 20))
         return result.optJSONArray("users") ?: JSONArray()
