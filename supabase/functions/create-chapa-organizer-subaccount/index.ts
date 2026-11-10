@@ -13,7 +13,17 @@ Deno.serve(async (req) => {
   const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) return json({ error: 'Sign-in required' }, 401)
   const key = Deno.env.get('CHAPA_PRIVATE_KEY')
-  if (!key) return json({ error: 'Payment provider is not configured' }, 503)
+  const chapaMode = Deno.env.get('CHAPA_MODE')?.toLowerCase()
+  if (!key || !['test', 'live'].includes(chapaMode ?? '')) {
+    return json({ error: 'Configure CHAPA_PRIVATE_KEY and CHAPA_MODE (test or live) in Supabase Edge Function secrets' }, 503)
+  }
+  const keyMode = key.startsWith('CHAPA_TEST_') ? 'test' : key.startsWith('CHAPA_LIVE_') ? 'live' : null
+  if (keyMode && keyMode !== chapaMode) {
+    return json({ error: 'Chapa API key environment does not match CHAPA_MODE' }, 503)
+  }
+  if (chapaMode === 'live' && Deno.env.get('TIQET_LIVE_MARKETPLACE_APPROVED') !== 'true') {
+    return json({ error: 'Live organiser settlement setup is locked until Tiqet has written marketplace approval and merchant activation from Chapa.' }, 403)
+  }
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
