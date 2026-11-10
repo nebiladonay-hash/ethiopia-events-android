@@ -130,7 +130,6 @@ Deno.serve(async (req) => {
 
   const safePayload = safeProviderPayload(providerJson)
   const data = providerJson?.data ?? {}
-  const providerStatus = String(data?.status ?? '').toUpperCase()
   const providerReference = String(data?.chapa_reference ?? '')
   if (providerResponse.ok && providerJson?.status === 'success' && providerReference) {
     // Creation confirms that Chapa accepted a refund request, not that the
