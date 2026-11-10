@@ -43,6 +43,25 @@ class SupabaseApi(
     suspend fun getOrganisers(session: ControlSession): JSONArray =
         getArray(session, "/rest/v1/organisations?select=id,name,legal_name,contact_phone,status,verification_notes,created_at&status=eq.pending&order=created_at.asc")
 
+    suspend fun getVerifiedOrganisers(session: ControlSession): JSONArray {
+        val result = rpc(session, "get_tiqet_verified_organisers", JSONObject())
+        return result.optJSONArray("organisers") ?: JSONArray()
+    }
+
+    suspend fun setOrganiserAutoPublish(
+        session: ControlSession,
+        organisationId: String,
+        enabled: Boolean,
+        reason: String
+    ): JSONObject = rpc(
+        session,
+        "set_organiser_auto_publish",
+        JSONObject()
+            .put("p_organisation_id", organisationId)
+            .put("p_enabled", enabled)
+            .put("p_reason", reason)
+    )
+
     suspend fun getPendingEvents(session: ControlSession): JSONArray =
         getArray(session, "/rest/v1/events?select=id,title,description,category,starts_at,venue_name,address,city,organisation_id,created_at&status=eq.submitted&approval_status=eq.pending&order=created_at.asc")
 
