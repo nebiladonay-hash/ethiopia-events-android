@@ -127,6 +127,25 @@ class SupabaseApi(
         )
     }
 
+    suspend fun resolveOrganiserPayout(
+        session: ControlSession,
+        requestId: String,
+        status: String,
+        providerReference: String,
+        operatorNote: String
+    ): JSONObject = withContext(Dispatchers.IO) {
+        request(
+            method = "POST",
+            path = "/functions/v1/tiqet-admin-organiser-payout",
+            body = JSONObject()
+                .put("request_id", requestId)
+                .put("status", status)
+                .put("provider_reference", providerReference)
+                .put("operator_note", operatorNote),
+            session = session
+        )
+    }
+
     suspend fun createChapaRefund(
         session: ControlSession,
         paymentId: String,
