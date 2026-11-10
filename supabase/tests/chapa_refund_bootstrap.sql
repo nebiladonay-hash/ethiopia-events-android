@@ -73,6 +73,40 @@ CREATE TABLE public.payments (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE public.platform_payouts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  amount_minor bigint NOT NULL CHECK (amount_minor >= 100),
+  currency text NOT NULL DEFAULT 'ETB' CHECK (currency = 'ETB'),
+  bank_slug text NOT NULL,
+  bank_name text NOT NULL,
+  account_name text NOT NULL,
+  account_last4 text NOT NULL CHECK (account_last4 ~ '^[0-9]{4}
+-- Minimal test-only administrator predicate. A non-null authenticated user is
+-- considered an administrator in this isolated database.
+CREATE OR REPLACE FUNCTION public.is_tiqet_admin()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT auth.uid() IS NOT NULL
+$$;
+
+GRANT USAGE ON SCHEMA public, auth TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION auth.role() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION auth.jwt() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.is_tiqet_admin() TO anon, authenticated, service_role;
+),
+  merchant_reference text NOT NULL UNIQUE,
+  provider_reference text,
+  provider_service_fee_minor bigint NOT NULL DEFAULT 0 CHECK (provider_service_fee_minor >= 0),
+  status text NOT NULL DEFAULT 'reserved'
+    CHECK (status IN ('reserved','pending','succeeded','failed','reversed','blocked','auth_needed','otp_needed','otp_failed')),
+  provider_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 -- Minimal test-only administrator predicate. A non-null authenticated user is
 -- considered an administrator in this isolated database.
 CREATE OR REPLACE FUNCTION public.is_tiqet_admin()
