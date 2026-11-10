@@ -1,0 +1,107 @@
+name: ArifPay sandbox API smoke test
+
+on:
+  push:
+    branches:
+      - tiqet-arifpay-sandbox
+    paths:
+      - .github/workflows/arifpay-sandbox-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  arifpay-sandbox:
+    name: Exercise documented C2B sandbox flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Create a unique sandbox checkout session and simulate M-Pesa success
+        env:
+          ARIFPAY_BASE_URL: https://gateway.arifpay.org
+          ARIFPAY_SANDBOX_KEY: arif-sandbox-portal-key
+        run: |
+          node <<'NODE'
+          const crypto = require('node:crypto');
+
+          const base = process.env.ARIFPAY_BASE_URL;
+          const key = process.env.ARIFPAY_SANDBOX_KEY;
+          const headers = {
+            'content-type': 'application/json',
+            'x-arifpay-key': key,
+            'x-arifpay-sim-mode': 'SUCCESS',
+            'x-arifpay-fee-source': 'MERCHANT',
+          };
+
+          async function post(path, body, extraHeaders = {}) {
+            const response = await fetch(base + path, {
+              method: 'POST',
+              headers: { ...headers, ...extraHeaders },
+              body: JSON.stringify(body),
+              signal: AbortSignal.timeout(25000),
+            });
+            const raw = await response.text();
+            let json;
+            try { json = JSON.parse(raw); } catch {
+              throw new Error(`Non-JSON response from ${path} (HTTP ${response.status})`);
+            }
+            return { response, json };
+          }
+
+          function assertEnvelope(result, label) {
+            if (!result.response.ok || result.json?.error !== false || !result.json?.data) {
+              throw new Error(`${label} failed (HTTP ${result.response.status}): ${String(result.json?.msg ?? 'invalid provider response').slice(0, 200)}`);
+            }
+          }
+
+          function getSessionId(json) {
+            return json?.data?.sessionId ?? json?.data?.uuid ?? json?.sessionId ?? null;
+          }
+
+          async function createSession(suffix) {
+            const nonce = `tiqet-${Date.now()}-${crypto.randomUUID().slice(0, 8)}-${suffix}`;
+            const expireDate = new Date(Date.now() + 30 * 60 * 1000).toISOString().slice(0, 19);
+            const request = await post('/api/sandbox/c2b/session', {
+              cancelUrl: 'https://example.com/tiqet-cancel',
+              phone: '251700000000',
+              email: 'sandbox@tiqet.app',
+              nonce,
+              errorUrl: 'https://example.com/tiqet-error',
+              notifyUrl: 'https://example.com/tiqet-notify',
+              successUrl: 'https://example.com/tiqet-success',
+              expireDate,
+              amount: 10,
+              items: [{ name: 'Tiqet sandbox test ticket', quantity: 1, price: 10, description: 'Automated ArifPay sandbox test' }],
+              lang: 'EN',
+            });
+            assertEnvelope(request, 'Create sandbox session');
+            const sessionId = getSessionId(request.json);
+            if (typeof sessionId !== 'string' || sessionId.length < 8) {
+              throw new Error('ArifPay sandbox session response did not contain a sessionId');
+            }
+            return { sessionId, nonce };
+          }
+
+          (async () => {
+            const successSession = await createSession('success');
+            const success = await post('/api/sandbox/c2b/mpesa/transfer', {
+              sessionId: successSession.sessionId,
+              phoneNumber: '251700000000',
+            });
+            assertEnvelope(success, 'M-Pesa success simulation');
+
+            console.log(JSON.stringify({
+              provider: 'arifpay',
+              environment: 'sandbox',
+              session_created: true,
+              session_reference_present: true,
+              success_simulation: 'provider accepted',
+              provider_message: String(success.json.msg ?? '').slice(0, 120),
+              note: 'This smoke test exercises ArifPay sandbox session creation and simulator transfer only; it does not verify TIQET order fulfillment or production settlement.',
+            }, null, 2));
+          })().catch((error) => {
+            console.error(error instanceof Error ? error.message : 'ArifPay sandbox test failed');
+            process.exitCode = 1;
+          });
+          NODE
