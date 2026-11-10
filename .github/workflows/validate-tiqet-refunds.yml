@@ -47,3 +47,4 @@ jobs:
           grep -q 'record_chapa_refund_result' supabase/migrations/20261110120000_chapa_refund_operations.sql
           grep -q 'get_tiqet_refunds_dashboard' supabase/migrations/20261110120000_chapa_refund_operations.sql
           grep -q 'reconcile_chapa_refund_notice' supabase/migrations/20261110120000_chapa_refund_operations.sql
+          grep -q 'record_tiqet_platform_payout_result' supabase/migrations/20261110120000_chapa_refund_operations.sql
