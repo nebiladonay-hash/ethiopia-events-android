@@ -23,8 +23,10 @@ The existing Tiqet core schema was already present before this connected product
 - `20261108133852_merge_overlapping_public_read_policies`
 - `20261108134159_split_anon_public_read_rls_policies`
 - `20261108141944_lock_down_webhook_event_table_grants`
+- `20261110051948_tiqet_control_staff_roles_and_review_workflow`
+- `20261110052005_tiqet_control_staff_directory_and_audit_access`
 
-The remote schema contains 22 public tables; all observed public tables had RLS enabled. Internal accounting/provider/webhook tables are service-role-only. The production migration history does **not** yet represent the older baseline schema files in the V7.1 archive. Do not run `supabase db push` from the archive until the baseline is reconciled. The GitHub backend workflow is currently a package/source verification workflow only and does not push schema changes.
+The remote schema contains 24 public tables; all observed public tables have RLS enabled. Internal accounting/provider/webhook tables are service-role-only. The production migration history does **not** yet represent the older baseline schema files in the V7.1 archive. Do not run `supabase db push` from the archive until the baseline is reconciled. The GitHub backend workflow is currently a package/source verification workflow only and does not push schema changes.
 
 ## Active Edge Functions
 
@@ -110,3 +112,25 @@ No customer payment, payout, refund, or provider settlement has been performed. 
 - A rollback-only database smoke test exercised event submission, paid-ticket hold/inventory reservation, free-ticket claim, ticket issuance, check-in, and duplicate check-in rejection. A separate rollback-only test exercised organiser settlement balance/history and idempotent payout-request queueing. All temporary QA rows were rolled back and production data counts remain zero for organisations, events, orders, payments, tickets, settlement entries and payout requests.
 - The platform revenue RPC currently reports ETB 0.00 available, consistent with the empty production data set. No payment, refund or payout has been sent.
 - Storage has one private `event-images` bucket with no Storage RLS policies and zero objects. Do not enable broad public writes; implement organiser/event-scoped upload and approved-event read policies together with the corresponding app upload flow before relying on event-image uploads.
+
+
+## Tiqet Control — staff administration and review workflow (10 November 2026)
+
+The live project now includes the initial secured backend for the separate **Tiqet Control** companion app.
+
+- `tiqet_staff_roles` stores one server-managed staff role per user: `moderator`, `admin`, or `super_admin`. It has RLS enabled and no direct client table grants.
+- `is_tiqet_moderator()`, `is_tiqet_admin()`, and `is_tiqet_super_admin()` are SECURITY DEFINER helper functions with an empty search path. Each returns only the calling user's own role capability.
+- Moderators and administrators can read submitted event records through a dedicated RLS policy. Staff can read organiser applications; the organiser's private account data remains subject to normal profile policies.
+- `review_event_submission` lets moderators/admins approve, reject, or request changes. Approval publishes the event; rejection returns it to draft with a reviewer note. Organisers can edit pending/rejected drafts but cannot set an event to approved or published themselves.
+- `submit_event_for_review` was corrected to reset reviewer fields and set `approval_status='pending'` when an organiser resubmits a rejected draft.
+- `review_organiser_application` is admin/super-admin only and supports approve, reject, and request-info decisions.
+- `tiqet_admin_audit_log` records staff assignments/revocations and organiser/event review actions. It has RLS enabled and no direct client table grants.
+- `get_tiqet_control_overview`, `get_tiqet_staff_directory`, `search_tiqet_users`, and `get_tiqet_admin_audit_log` provide narrowly scoped dashboard reads. Staff assignment/revocation RPCs check the caller's super-admin role and prevent removal of the final super-admin.
+
+The known founder account was granted the first `super_admin` role directly in the live project. Its email/UUID are intentionally not hardcoded in public source control. For another environment, bootstrap the first super-admin out-of-band using the trusted account UUID, then manage subsequent staff through the protected RPCs.
+
+### Verification completed
+
+A rollback-only SQL smoke test authenticated as the bootstrapped super-admin, approved a temporary organiser application, approved a temporary event, read the dashboard overview, and retrieved the staff directory. The transaction was rolled back. A follow-up count check confirmed that no test organisations or events remained; the only persistent staff role is the founder super-admin, and the only persistent audit entry is the initial role bootstrap.
+
+No separate Tiqet Control Android APK has been built yet. This work establishes its backend contract and permissions. The companion app UI and build pipeline remain the next implementation phase.
