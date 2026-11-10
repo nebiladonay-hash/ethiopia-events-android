@@ -14,6 +14,8 @@ DECLARE
   v_full_refund_id uuid;
   v_error text;
   v_count bigint;
+  v_payout_id uuid;
+  v_payout_result jsonb;
 BEGIN
   -- The RPC must reject callers without an authenticated administrator identity.
   PERFORM set_config('request.jwt.claim.sub', '', true);
@@ -260,7 +262,72 @@ BEGIN
     RAISE EXCEPTION 'TEST_ASSERT: dashboard refund rows are incomplete';
   END IF;
 
-  RAISE NOTICE 'PASS: refund migration and lifecycle tests completed';
+  -- Payout result writes are service-role-only.
+  INSERT INTO public.platform_payouts(
+    amount_minor, currency, bank_slug, bank_name, account_name,
+    account_last4, merchant_reference
+  ) VALUES (
+    25000, 'ETB', 'test_bank', 'Test Bank', 'Test Account',
+    '1234', 'TQ-PAYOUT-STATE-TEST'
+  ) RETURNING id INTO v_payout_id;
+
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  BEGIN
+    PERFORM public.record_tiqet_platform_payout_result(
+      v_payout_id, 'pending', 'CHAPA-PAYOUT-STATE-1', 0, '{}'::jsonb
+    );
+    RAISE EXCEPTION 'TEST_ASSERT: authenticated caller wrote payout provider result';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_error = MESSAGE_TEXT;
+    IF v_error LIKE 'TEST_ASSERT:%' THEN RAISE; END IF;
+    IF v_error NOT LIKE '%Service role required%' THEN
+      RAISE EXCEPTION 'Unexpected payout service-role gate error: %', v_error;
+    END IF;
+  END;
+
+  PERFORM set_config('request.jwt.claim.role', 'service_role', true);
+  v_payout_result := public.record_tiqet_platform_payout_result(
+    v_payout_id, 'succeeded', 'CHAPA-PAYOUT-STATE-1', 250, '{"status":"SUCCESS"}'::jsonb
+  );
+  IF v_payout_result->>'status' <> 'succeeded' THEN
+    RAISE EXCEPTION 'TEST_ASSERT: verified payout success was not recorded';
+  END IF;
+
+  -- A late PENDING or FAILED notification cannot regress a terminal success.
+  v_payout_result := public.record_tiqet_platform_payout_result(
+    v_payout_id, 'pending', 'CHAPA-PAYOUT-STATE-1', 0, '{"status":"PENDING"}'::jsonb
+  );
+  IF coalesce((v_payout_result->>'ignored_conflicting_status')::boolean, false) IS NOT TRUE
+     OR (SELECT status FROM public.platform_payouts WHERE id = v_payout_id) <> 'succeeded' THEN
+    RAISE EXCEPTION 'TEST_ASSERT: stale pending payout status regressed success';
+  END IF;
+
+  v_payout_result := public.record_tiqet_platform_payout_result(
+    v_payout_id, 'failed', 'CHAPA-PAYOUT-STATE-1', 0, '{"status":"FAILED"}'::jsonb
+  );
+  IF coalesce((v_payout_result->>'ignored_conflicting_status')::boolean, false) IS NOT TRUE
+     OR (SELECT status FROM public.platform_payouts WHERE id = v_payout_id) <> 'succeeded' THEN
+    RAISE EXCEPTION 'TEST_ASSERT: contradictory payout failure regressed success';
+  END IF;
+
+  -- A verified reversal is the one supported terminal transition after success.
+  v_payout_result := public.record_tiqet_platform_payout_result(
+    v_payout_id, 'reversed', 'CHAPA-PAYOUT-STATE-1', 250, '{"status":"REVERSED"}'::jsonb
+  );
+  IF coalesce((v_payout_result->>'ignored_conflicting_status')::boolean, false) IS TRUE
+     OR (SELECT status FROM public.platform_payouts WHERE id = v_payout_id) <> 'reversed' THEN
+    RAISE EXCEPTION 'TEST_ASSERT: verified payout reversal was not recorded';
+  END IF;
+
+  v_payout_result := public.record_tiqet_platform_payout_result(
+    v_payout_id, 'succeeded', 'CHAPA-PAYOUT-STATE-1', 250, '{"status":"SUCCESS"}'::jsonb
+  );
+  IF coalesce((v_payout_result->>'ignored_conflicting_status')::boolean, false) IS NOT TRUE
+     OR (SELECT status FROM public.platform_payouts WHERE id = v_payout_id) <> 'reversed' THEN
+    RAISE EXCEPTION 'TEST_ASSERT: late success regressed a verified payout reversal';
+  END IF;
+
+  RAISE NOTICE 'PASS: refund and payout reconciliation lifecycle tests completed';
 END $$;
 
 ROLLBACK;
