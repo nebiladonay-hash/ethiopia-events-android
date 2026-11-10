@@ -99,23 +99,8 @@ jobs:
             if grep -Fq 'api.createChapaCheckout(ticketTypeId, ticketCount)' "$REJECTS" \
               && grep -Fq 'selectedPaymentMethod.takeIf' "$REJECTS" \
               && [ "$(grep -c '^@@' "$REJECTS")" -eq 1 ]; then
-              python3 - <<'PY'
-          from pathlib import Path
-          import os
-
-          path = Path(os.environ["PROJECT_DIR"]) / "app/src/main/java/et/events/mobile/MainActivity.kt"
-          source = path.read_text()
-          old = "api.createChapaCheckout(ticketTypeId, ticketCount)"
-          new = "api.createChapaCheckout(ticketTypeId, ticketCount, selectedPaymentMethod.takeIf { it.isNotBlank() })"
-          if source.count(new) == 1:
-              print("The payment-method patch already supplied the method-aware checkout argument.")
-          elif source.count(old) == 1:
-              path.write_text(source.replace(old, new, 1))
-              print("Applied the exact method-aware checkout argument from the single rejected patch hunk.")
-          else:
-              raise SystemExit("Expected one original or one method-aware Chapa checkout call; found neither uniquely.")
-          PY
-              grep -Fq 'api.createChapaCheckout(ticketTypeId, ticketCount, selectedPaymentMethod.takeIf' "$MAIN_ACTIVITY"
+              test "$(grep -Fc 'api.createChapaCheckout(' "$MAIN_ACTIVITY")" -eq 1
+              grep -Fq 'selectedPaymentMethod.takeIf' "$MAIN_ACTIVITY"
               rm "$REJECTS"
             else
               echo "Unexpected branding patch conflict; refusing to continue."
