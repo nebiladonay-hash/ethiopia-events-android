@@ -1487,7 +1487,7 @@ private fun FinanceRecord(title: String, subtitle: String, reference: String, st
 
 @Composable
 private fun StatusPill(status: String) {
-    val good = status.lowercase() in listOf("paid","succeeded","verified","approved","reconciled")
+    val good = status.lowercase() in listOf("paid","succeeded","verified","approved","reconciled","partially_refunded")
     Box(
         Modifier.clip(RoundedCornerShape(20.dp))
             .background(if(good) TealPale else AccentPale)
