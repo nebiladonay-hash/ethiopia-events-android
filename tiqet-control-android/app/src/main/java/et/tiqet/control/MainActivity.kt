@@ -33,6 +33,7 @@ import et.tiqet.control.data.SupabaseApi
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 
 private val Ink = Color(0xFF152C2A)
 private val Muted = Color(0xFF75837E)
@@ -216,7 +217,8 @@ private enum class ControlTab(val label: String) {
     ORGANISERS("Organisers"),
     EVENTS("Events"),
     TEAM("Team"),
-    ACTIVITY("Activity")
+    ACTIVITY("Activity"),
+    FINANCE("Finance")
 }
 
 @Composable
@@ -230,6 +232,7 @@ private fun ControlWorkspace(
     var events by remember { mutableStateOf(JSONArray()) }
     var staff by remember { mutableStateOf(JSONArray()) }
     var audit by remember { mutableStateOf(JSONArray()) }
+    var finance by remember { mutableStateOf(JSONObject()) }
     var selectedTab by remember { mutableStateOf(ControlTab.OVERVIEW) }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -249,6 +252,7 @@ private fun ControlWorkspace(
                 if (overview.optBoolean("admin_access")) {
                     organisers = api.getOrganisers(session)
                     audit = api.getAuditLog(session)
+                    finance = api.getFinanceDashboard(session)
                 }
                 if (overview.optBoolean("super_admin_access")) {
                     staff = api.getStaffDirectory(session)
@@ -269,6 +273,7 @@ private fun ControlWorkspace(
         add(ControlTab.EVENTS)
         if (isSuperAdmin) add(ControlTab.TEAM)
         if (isAdmin) add(ControlTab.ACTIVITY)
+        if (isAdmin) add(ControlTab.FINANCE)
     }
 
     Column(
@@ -389,6 +394,7 @@ private fun ControlWorkspace(
                     onError = { error = it }
                 )
                 ControlTab.ACTIVITY -> ActivityScreen(entries = audit, busy = busy)
+                ControlTab.FINANCE -> FinanceScreen(finance = finance, busy = busy)
             }
         }
     }
@@ -459,6 +465,13 @@ private fun OverviewScreen(
                     title = "Organiser applications",
                     subtitle = "${overview.optInt("pending_organisers")} waiting for verification",
                     onClick = { onOpenTab(ControlTab.ORGANISERS) }
+                )
+            }
+            item {
+                QueueShortcut(
+                    title = "Financial monitoring",
+                    subtitle = "Payments, refunds, revenue and payout status",
+                    onClick = { onOpenTab(ControlTab.FINANCE) }
                 )
             }
             item {
@@ -749,6 +762,160 @@ private fun TeamScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun FinanceScreen(finance: JSONObject, busy: Boolean) {
+    val summary = finance.optJSONObject("summary") ?: JSONObject()
+    val payments = finance.optJSONArray("recent_payments") ?: JSONArray()
+    val refunds = finance.optJSONArray("refund_alerts") ?: JSONArray()
+    val platformPayouts = finance.optJSONArray("platform_payouts") ?: JSONArray()
+    val organiserPayouts = finance.optJSONArray("organiser_payout_requests") ?: JSONArray()
+
+    fun money(value: Double): String = "ETB " + String.format(Locale.US, "%,.2f", value)
+    fun amount(row: JSONObject, key: String = "amount_minor"): String =
+        money(row.optLong(key).toDouble() / 100.0)
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start=16.dp,end=16.dp,top=15.dp,bottom=28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Column {
+                Text("Financial monitoring",color=Ink,fontSize=23.sp,fontWeight=FontWeight.Bold)
+                Text("Read-only overview of verified payments, refunds and payout queues.",color=Muted,fontSize=11.sp,lineHeight=16.sp)
+                if (busy) {
+                    Spacer(Modifier.height(8.dp))
+                    LinearProgressIndicator(Modifier.fillMaxWidth(),color=Teal)
+                }
+            }
+        }
+        item {
+            Row(horizontalArrangement=Arrangement.spacedBy(9.dp)) {
+                FinanceMetric("NET PLATFORM REVENUE",money(summary.optDouble("net_platform_revenue_etb")),Teal,Modifier.weight(1f))
+                FinanceMetric("PAID ORDERS",summary.optInt("paid_orders").toString(),Ink,Modifier.weight(1f))
+            }
+        }
+        item {
+            Row(horizontalArrangement=Arrangement.spacedBy(9.dp)) {
+                FinanceMetric("PAYMENT REVIEW",summary.optInt("payment_reviews").toString(),Accent,Modifier.weight(1f))
+                FinanceMetric("REFUNDS TO REVIEW",summary.optInt("refunds_needing_review").toString(),Danger,Modifier.weight(1f))
+            }
+        }
+        item {
+            Row(horizontalArrangement=Arrangement.spacedBy(9.dp)) {
+                FinanceMetric("PLATFORM PAYOUTS IN FLIGHT",summary.optInt("platform_payouts_in_flight").toString(),Ink,Modifier.weight(1f))
+                FinanceMetric("ORGANISER PAYOUT REQUESTS",summary.optInt("organiser_payout_requests_open").toString(),Teal,Modifier.weight(1f))
+            }
+        }
+        item { FinanceSectionTitle("Recent payments",payments.length()) }
+        if (payments.length()==0) {
+            item { EmptyState("No payment records yet","Verified test or customer payments will appear here.") }
+        } else {
+            items((0 until payments.length()).mapNotNull{payments.optJSONObject(it)},key={it.optString("payment_id")}) { row ->
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(CardWhite).padding(13.dp)) {
+                    Row(verticalAlignment=Alignment.CenterVertically) {
+                        Text(amount(row),color=Ink,fontSize=16.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
+                        StatusPill(row.optString("status"))
+                    }
+                    Text("${row.optString("provider")} · ${row.optString("payment_method")}",color=Teal,fontSize=10.sp)
+                    Text("Order: ${row.optString("order_status")} · ${row.optString("buyer_email")}",color=Muted,fontSize=10.sp)
+                    Text(row.optString("merchant_reference"),color=Muted,fontSize=9.sp)
+                    Text(row.optString("created_at").replace("T"," ").take(16),color=Muted,fontSize=9.sp)
+                }
+            }
+        }
+        item { FinanceSectionTitle("Refund alerts",refunds.length()) }
+        if (refunds.length()==0) {
+            item { Text("No refund alerts recorded.",color=Muted,fontSize=11.sp) }
+        } else {
+            items((0 until refunds.length()).mapNotNull{refunds.optJSONObject(it)},key={it.optString("id")}) { row ->
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(CardWhite).padding(13.dp)) {
+                    Row(verticalAlignment=Alignment.CenterVertically) {
+                        Text(row.optString("event_name","Refund notice").replace('_',' '),color=Ink,fontSize=12.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
+                        StatusPill(row.optString("review_status"))
+                    }
+                    Text("Refunded ${amount(row,"refunded_amount_minor")} / ${amount(row,"original_amount_minor")}",color=Ink,fontSize=11.sp)
+                    Text("${row.optString("provider_status")} · ${row.optString("merchant_reference")}",color=Muted,fontSize=10.sp)
+                    Text(row.optString("received_at").replace("T"," ").take(16),color=Muted,fontSize=9.sp)
+                }
+            }
+        }
+        item { FinanceSectionTitle("Platform withdrawals",platformPayouts.length()) }
+        if(platformPayouts.length()==0) {
+            item { Text("No platform withdrawals recorded.",color=Muted,fontSize=11.sp) }
+        } else {
+            items((0 until platformPayouts.length()).mapNotNull{platformPayouts.optJSONObject(it)},key={it.optString("id")}) { row ->
+                FinanceRecord(
+                    title=amount(row),
+                    subtitle="${row.optString("bank_name")} · •• ${row.optString("account_last4")}",
+                    reference=row.optString("merchant_reference"),
+                    status=row.optString("status")
+                )
+            }
+        }
+        item { FinanceSectionTitle("Organiser payout requests",organiserPayouts.length()) }
+        if(organiserPayouts.length()==0) {
+            item { Text("No organiser payout requests recorded.",color=Muted,fontSize=11.sp) }
+        } else {
+            items((0 until organiserPayouts.length()).mapNotNull{organiserPayouts.optJSONObject(it)},key={it.optString("id")}) { row ->
+                FinanceRecord(
+                    title=amount(row),
+                    subtitle="${row.optString("organisation_name")} · ${row.optString("provider")}",
+                    reference=row.optString("provider_reference"),
+                    status=row.optString("status")
+                )
+            }
+        }
+        item {
+            Text(
+                "Read-only monitoring. This screen does not initiate refunds, approve withdrawals or move money.",
+                color=Muted,fontSize=10.sp,lineHeight=15.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun FinanceMetric(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
+    Column(modifier.clip(RoundedCornerShape(15.dp)).background(CardWhite).padding(13.dp)) {
+        Text(label,color=Muted,fontSize=8.sp,fontWeight=FontWeight.Bold,letterSpacing=.7.sp)
+        Spacer(Modifier.height(7.dp))
+        Text(value,color=color,fontSize=18.sp,fontWeight=FontWeight.Bold,maxLines=2)
+    }
+}
+
+@Composable
+private fun FinanceSectionTitle(title: String, count: Int) {
+    Row(verticalAlignment=Alignment.CenterVertically) {
+        Text(title,color=Ink,fontSize=13.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
+        Text(count.toString(),color=Muted,fontSize=10.sp)
+    }
+}
+
+@Composable
+private fun FinanceRecord(title: String, subtitle: String, reference: String, status: String) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(CardWhite).padding(13.dp)) {
+        Row(verticalAlignment=Alignment.CenterVertically) {
+            Text(title,color=Ink,fontSize=15.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
+            StatusPill(status)
+        }
+        Text(subtitle,color=Muted,fontSize=10.sp)
+        if(reference.isNotBlank()) Text(reference,color=Muted,fontSize=9.sp)
+    }
+}
+
+@Composable
+private fun StatusPill(status: String) {
+    val good = status.lowercase() in listOf("paid","succeeded","verified","approved","reconciled")
+    Box(
+        Modifier.clip(RoundedCornerShape(20.dp))
+            .background(if(good) TealPale else AccentPale)
+            .padding(horizontal=8.dp,vertical=4.dp)
+    ) {
+        Text(status.replace('_',' '),color=if(good) Teal else Accent,fontSize=9.sp,fontWeight=FontWeight.Bold)
     }
 }
 
