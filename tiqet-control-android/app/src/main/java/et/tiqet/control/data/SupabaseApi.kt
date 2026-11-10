@@ -65,6 +65,22 @@ class SupabaseApi(
     suspend fun getPendingEvents(session: ControlSession): JSONArray =
         getArray(session, "/rest/v1/events?select=id,title,description,category,starts_at,venue_name,address,city,organisation_id,created_at&status=eq.submitted&approval_status=eq.pending&order=created_at.asc")
 
+    suspend fun getPublishedEventsForReview(session: ControlSession, limit: Int = 50): JSONArray {
+        val result = rpc(
+            session,
+            "get_tiqet_published_events_for_review",
+            JSONObject().put("p_limit", limit)
+        )
+        return result.optJSONArray("events") ?: JSONArray()
+    }
+
+    suspend fun flagPublishedEvent(session: ControlSession, eventId: String, reason: String): JSONObject =
+        rpc(
+            session,
+            "flag_tiqet_event_for_review",
+            JSONObject().put("p_event_id", eventId).put("p_reason", reason)
+        )
+
     suspend fun getStaffDirectory(session: ControlSession): JSONArray {
         val result = rpc(session, "get_tiqet_staff_directory", JSONObject())
         return result.optJSONArray("staff") ?: JSONArray()
