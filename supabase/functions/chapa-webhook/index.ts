@@ -113,6 +113,14 @@ Deno.serve(async (req) => {
       p_currency: currency, p_provider_payload: event,
     })
     if (refundError) return json({ error: 'Could not persist refund notice for reconciliation' }, 500)
+    const { data: reconciliation, error: reconciliationError } = await admin.rpc('reconcile_chapa_refund_notice', {
+      p_merchant_reference: merchantReference,
+      p_refunded_amount_minor: refundedAmountMinor,
+    })
+    if (reconciliationError) {
+      console.error('Could not reconcile refund webhook with verified refund records', reconciliationError.message)
+      return json({ error: 'Refund notice was recorded but payment reconciliation needs retry' }, 503)
+    }
     const { data: refundPayment } = await admin.from('payments')
       .select('id, order_id').eq('merchant_reference', merchantReference).maybeSingle()
     if (refundPayment?.id) {
@@ -124,7 +132,7 @@ Deno.serve(async (req) => {
       }, { onConflict: 'provider,payload_digest', ignoreDuplicates: true })
       if (refundAuditError) console.error('Could not persist refund audit event', refundAuditError.message)
     }
-    return json({ received: true, refund_recorded: true, ...refundResult })
+    return json({ received: true, refund_recorded: true, reconciliation, ...refundResult })
   }
 
   if (event.webhook_type !== 'payment') return json({ received: true, ignored: true })
