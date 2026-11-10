@@ -52,7 +52,10 @@ Deno.serve(async (req) => {
       { headers: { Authorization: `Bearer ${chapaPrivateKey}` } })
     const verified = await verifyResponse.json().catch(() => ({}))
     const details = verified?.data
-    if (!verifyResponse.ok || verified?.status !== 'success' || !details) return json({ received: true, verified: false })
+    if (!verifyResponse.ok || verified?.status !== 'success' || !details) {
+      console.error('Chapa payout verification is temporarily unavailable')
+      return json({ error: 'Chapa payout verification is temporarily unavailable; retry this webhook' }, 503)
+    }
     if (String(details.merchant_reference ?? '') !== payout.merchant_reference ||
         String(details.currency ?? '') !== 'ETB' || Number(details.amount) !== Number(payout.amount_minor)) {
       return json({ error: 'Verified payout does not match the stored withdrawal' }, 409)
@@ -138,32 +141,38 @@ Deno.serve(async (req) => {
     { headers: { Authorization: `Bearer ${chapaPrivateKey}` } })
   const verified = await verifyResponse.json().catch(() => ({}))
   const details = verified?.data
-  if (!verifyResponse.ok || verified?.status !== 'success' || details?.status !== 'SUCCESS') {
-    if (event.status === 'failed' || event.status === 'cancelled') {
+  if (!verifyResponse.ok || verified?.status !== 'success' || !details) {
+    console.error('Chapa payment verification is temporarily unavailable')
+    return json({ error: 'Chapa payment verification is temporarily unavailable; retry this webhook' }, 503)
+  }
+  const verifiedStatus = String(details.status ?? '').toUpperCase()
+  if (verifiedStatus !== 'SUCCESS') {
+    if (verifiedStatus === 'FAILED' || verifiedStatus === 'CANCELLED') {
+      const failureReason = verifiedStatus.toLowerCase()
       const { error: failError } = await admin.rpc('fail_order_payment', {
-        p_order_id: payment.order_id, p_reason: String(event.status),
+        p_order_id: payment.order_id, p_reason: failureReason,
       })
-      if (failError) return json({ error: 'Could not persist failed payment state' }, 500)
+      if (failError) return json({ error: 'Could not persist verified failed-payment state' }, 500)
       const failedPayloadHash = await sha256(rawBytes)
       const { error: failedAttemptEventError } = await admin.from('payment_attempt_events').upsert({
         payment_id: payment.id, order_id: payment.order_id, provider: 'chapa', event_type: 'payment_failed',
         provider_event_reference: chapaReference || merchantReference,
         payload_digest: failedPayloadHash,
-        safe_metadata: { provider_status: String(event.status), source: 'signed_webhook' },
+        safe_metadata: { provider_status: verifiedStatus, source: 'verified_api' },
       }, { onConflict: 'provider,payload_digest', ignoreDuplicates: true })
       if (failedAttemptEventError) {
         console.error('Could not persist failed-payment audit event', failedAttemptEventError.message)
         return json({ error: 'Could not persist failed payment audit record' }, 500)
       }
       const { error: failureMetadataError } = await admin.from('payments').update({
-        failure_code: String(event.status), failure_message: 'Provider reported payment failure or cancellation.',
+        failure_code: failureReason, failure_message: 'Chapa verification confirmed payment failure or cancellation.',
       }).eq('id', payment.id)
       if (failureMetadataError) {
         console.error('Could not persist failed-payment details', failureMetadataError.message)
         return json({ error: 'Could not persist failed payment details' }, 500)
       }
     }
-    return json({ received: true, verified: false })
+    return json({ received: true, verified: true, payment_status: verifiedStatus || 'UNKNOWN' })
   }
 
   const amount = Number(details.amount)
