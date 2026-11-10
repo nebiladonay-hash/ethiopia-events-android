@@ -34,6 +34,11 @@ jobs:
         run: deno check supabase/functions/verify-chapa-refund/index.ts
       - name: Check Chapa payment and refund webhook
         run: deno check supabase/functions/chapa-webhook/index.ts
+      - name: Check Chapa checkout and marketplace settlement functions
+        run: |
+          deno check supabase/functions/create-chapa-checkout/index.ts
+          deno check supabase/functions/create-chapa-organizer-subaccount/index.ts
+          deno check supabase/functions/create-platform-payout/index.ts
       - name: Check migration safety markers
         shell: bash
         run: |
