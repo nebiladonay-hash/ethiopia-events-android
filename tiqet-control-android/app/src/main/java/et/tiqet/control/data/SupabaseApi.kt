@@ -56,6 +56,9 @@ class SupabaseApi(
         return result.optJSONArray("entries") ?: JSONArray()
     }
 
+    suspend fun getFinanceDashboard(session: ControlSession, limit: Int = 25): JSONObject =
+        rpc(session, "get_tiqet_finance_dashboard", JSONObject().put("p_limit", limit))
+
     suspend fun searchUsers(session: ControlSession, query: String): JSONArray {
         val result = rpc(session, "search_tiqet_users", JSONObject().put("p_query", query).put("p_limit", 20))
         return result.optJSONArray("users") ?: JSONArray()
