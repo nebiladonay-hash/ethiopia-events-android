@@ -25,6 +25,7 @@ The existing Tiqet core schema was already present before this connected product
 - `20261108141944_lock_down_webhook_event_table_grants`
 - `20261110051948_tiqet_control_staff_roles_and_review_workflow`
 - `20261110052005_tiqet_control_staff_directory_and_audit_access`
+- `20261110052251_tiqet_control_user_search`
 
 The remote schema contains 24 public tables; all observed public tables have RLS enabled. Internal accounting/provider/webhook tables are service-role-only. The production migration history does **not** yet represent the older baseline schema files in the V7.1 archive. Do not run `supabase db push` from the archive until the baseline is reconciled. The GitHub backend workflow is currently a package/source verification workflow only and does not push schema changes.
 
@@ -134,3 +135,24 @@ The known founder account was granted the first `super_admin` role directly in t
 A rollback-only SQL smoke test authenticated as the bootstrapped super-admin, approved a temporary organiser application, approved a temporary event, read the dashboard overview, and retrieved the staff directory. The transaction was rolled back. A follow-up count check confirmed that no test organisations or events remained; the only persistent staff role is the founder super-admin, and the only persistent audit entry is the initial role bootstrap.
 
 No separate Tiqet Control Android APK has been built yet. This work establishes its backend contract and permissions. The companion app UI and build pipeline remain the next implementation phase.
+
+
+## Tiqet Control companion app
+
+The separate Android companion source lives under `tiqet-control-android/` on the `tiqet-control-v1` branch. It uses the same Supabase project and customer Auth accounts; access is enforced by the backend staff-role records, not by a client-side role selector.
+
+The initial Control build includes:
+- Email/password sign-in followed by a server-side `get_tiqet_control_overview` authorization check.
+- Role-aware Overview, pending Organiser Applications, pending Event Submissions, Staff Access (super-admin only), and Activity Log (admin only).
+- Organiser approve/reject/request-info actions.
+- Event approve/reject/request-changes actions.
+- Super-admin-only staff user lookup, role assignment and revocation.
+
+The app uses only the public Supabase URL and publishable key in the Android client. It does not include the service-role key or database password. All privileged review actions call SECURITY DEFINER RPCs which enforce the role on the server.
+
+Build workflow:
+- Branch: `tiqet-control-v1`
+- Workflow: `.github/workflows/build-tiqet-control.yml`
+- Artifact name: `tiqet-control-debug-apk`
+
+The current companion-app source is an initial functional control MVP. Payment/reconciliation dashboards, account suspension, user moderation, staff-device session management, encrypted local session persistence and release signing are not implemented yet. No APK should be considered validated until the current workflow run succeeds and the resulting artifact has been smoke-tested on a device.
