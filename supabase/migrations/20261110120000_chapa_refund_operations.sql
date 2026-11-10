@@ -233,11 +233,74 @@ begin
 end;
 $function$;
 
+
+-- Reconcile cumulative refund webhook totals without treating the payment reference
+-- in a refund webhook as an individual refund reference.
+create or replace function public.reconcile_chapa_refund_notice(
+  p_merchant_reference text,
+  p_refunded_amount_minor bigint
+) returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_payment public.payments%rowtype;
+  v_verified_total bigint := 0;
+begin
+  if auth.role() <> 'service_role' then
+    raise exception 'Service role required';
+  end if;
+  if p_merchant_reference is null or btrim(p_merchant_reference) = '' or
+     p_refunded_amount_minor is null or p_refunded_amount_minor <= 0 then
+    raise exception 'Invalid refund reconciliation input';
+  end if;
+
+  select * into v_payment
+    from public.payments
+    where merchant_reference = p_merchant_reference
+    for update;
+  if not found then raise exception 'Payment reference not found'; end if;
+  if p_refunded_amount_minor > v_payment.amount_minor then
+    raise exception 'Webhook refund total exceeds the original payment amount';
+  end if;
+
+  select coalesce(sum(amount_minor), 0)::bigint into v_verified_total
+    from public.chapa_refund_operations
+    where payment_id = v_payment.id and status = 'succeeded';
+
+  -- A mismatch can indicate an external/manual refund, an unverified operation,
+  -- or an out-of-order notification. Keep the payment in review in those cases.
+  if v_verified_total <> p_refunded_amount_minor then
+    return jsonb_build_object(
+      'reconciled', false,
+      'verified_ledger_amount_minor', v_verified_total,
+      'webhook_refunded_amount_minor', p_refunded_amount_minor,
+      'manual_review_required', true
+    );
+  end if;
+
+  update public.payments
+    set refunded_amount_minor = v_verified_total,
+        status = case when v_verified_total >= amount_minor then 'refunded' else 'succeeded' end,
+        updated_at = now()
+    where id = v_payment.id;
+
+  return jsonb_build_object(
+    'reconciled', true,
+    'refunded_amount_minor', v_verified_total,
+    'payment_status', case when v_verified_total >= v_payment.amount_minor then 'refunded' else 'succeeded' end
+  );
+end;
+$function$;
+
 revoke all on function public.prepare_chapa_refund(uuid,bigint,text,text) from public, anon;
 grant execute on function public.prepare_chapa_refund(uuid,bigint,text,text) to authenticated;
 revoke all on function public.record_chapa_refund_result(uuid,text,text,jsonb,text) from public, anon, authenticated;
 grant execute on function public.record_chapa_refund_result(uuid,text,text,jsonb,text) to service_role;
 revoke all on function public.get_tiqet_refunds_dashboard(integer) from public, anon;
 grant execute on function public.get_tiqet_refunds_dashboard(integer) to authenticated;
+revoke all on function public.reconcile_chapa_refund_notice(text,bigint) from public, anon, authenticated;
+grant execute on function public.reconcile_chapa_refund_notice(text,bigint) to service_role;
 
 commit;
