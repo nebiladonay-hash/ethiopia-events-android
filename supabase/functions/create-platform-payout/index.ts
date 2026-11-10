@@ -96,17 +96,19 @@ Deno.serve(async (req) => {
     })
     result = await response.json().catch(() => ({}))
   } catch {
-    const { error: uncertainUpdateError } = await admin.from('platform_payouts').update({
-      status: 'pending',
-      provider_payload: { creation_status: 'unknown', creation_message: 'Network interruption during payout submission; provider acceptance is unknown.', ambiguous_provider_response: true },
-      updated_at: new Date().toISOString(),
-    }).eq('id', reservation.id)
+    const { data: uncertainResult, error: uncertainUpdateError } = await admin.rpc('record_tiqet_platform_payout_result', {
+      p_payout_id: reservation.id,
+      p_status: 'pending',
+      p_provider_reference: null,
+      p_provider_service_fee_minor: 0,
+      p_provider_payload: { creation_status: 'unknown', creation_message: 'Network interruption during payout submission; provider acceptance is unknown.', ambiguous_provider_response: true },
+    })
     if (uncertainUpdateError) {
       console.error('Could not persist uncertain Chapa payout submission', uncertainUpdateError.message)
       return json({ error: 'The payout submission result is unknown and its reconciliation record could not be saved. Do not submit another withdrawal; contact support.' }, 500)
     }
     return json({
-      payout_id: reservation.id, merchant_reference: reservation.merchant_reference, status: 'pending',
+      payout_id: reservation.id, merchant_reference: reservation.merchant_reference, status: uncertainResult?.status ?? 'pending',
       message: 'The payout submission result is unknown. The amount remains reserved for reconciliation. Do not submit another withdrawal.',
     }, 202)
   }
@@ -115,31 +117,34 @@ Deno.serve(async (req) => {
   if (!response.ok || result?.status !== 'success' || !chapaReference) {
     const definiteRejection = response.status >= 400 && response.status < 500 &&
       ![408, 409, 425, 429].includes(response.status)
-    const { error: creationUpdateError } = await admin.from('platform_payouts').update({
-      provider_reference: chapaReference || null,
-      status: definiteRejection ? 'failed' : 'pending',
-      provider_payload: { creation_status: String(result?.status ?? 'unknown'), creation_message: String(result?.message ?? ''), ambiguous_provider_response: !definiteRejection },
-      updated_at: new Date().toISOString(),
-    }).eq('id', reservation.id)
+    const { data: creationResult, error: creationUpdateError } = await admin.rpc('record_tiqet_platform_payout_result', {
+      p_payout_id: reservation.id,
+      p_status: definiteRejection ? 'failed' : 'pending',
+      p_provider_reference: chapaReference || null,
+      p_provider_service_fee_minor: 0,
+      p_provider_payload: { creation_status: String(result?.status ?? 'unknown'), creation_message: String(result?.message ?? ''), ambiguous_provider_response: !definiteRejection },
+    })
     if (creationUpdateError) {
       console.error('Could not persist Chapa payout creation result', creationUpdateError.message)
       return json({ error: 'Chapa payout response received but could not be safely persisted; reconcile this withdrawal before retrying.' }, 500)
     }
-    if (definiteRejection) return json({ error: result?.message ?? 'Chapa rejected the withdrawal request' }, 502)
+    if (definiteRejection && creationResult?.status === 'failed') return json({ error: result?.message ?? 'Chapa rejected the withdrawal request' }, 502)
     return json({
       payout_id: reservation.id, merchant_reference: reservation.merchant_reference,
-      provider_reference: chapaReference || null, status: 'pending',
+      provider_reference: chapaReference || null, status: creationResult?.status ?? 'pending',
       message: 'Chapa did not return a definitive response. The amount remains reserved for reconciliation. Do not submit the same withdrawal again until its status is checked.',
     }, 202)
   }
 
   // Persist the provider reference before verification so a temporary verification
   // outage cannot leave an accepted payout with no reference for later reconciliation.
-  const { error: referenceSaveError } = await admin.from('platform_payouts').update({
-    provider_reference: chapaReference, status: 'pending',
-    provider_payload: { creation_status: 'success', chapa_reference: chapaReference, verification_available: false },
-    updated_at: new Date().toISOString(),
-  }).eq('id', reservation.id)
+  const { data: referenceResult, error: referenceSaveError } = await admin.rpc('record_tiqet_platform_payout_result', {
+    p_payout_id: reservation.id,
+    p_status: 'pending',
+    p_provider_reference: chapaReference,
+    p_provider_service_fee_minor: 0,
+    p_provider_payload: { creation_status: 'success', chapa_reference: chapaReference, verification_available: false },
+  })
   if (referenceSaveError) {
     console.error('Could not persist accepted Chapa payout reference', referenceSaveError.message)
     return json({ error: 'Chapa accepted the payout but TIQET could not save its provider reference. Do not retry; reconcile this withdrawal.' }, 500)
@@ -154,16 +159,18 @@ Deno.serve(async (req) => {
     )
     verification = await verifyResponse.json().catch(() => ({}))
   } catch {
-    const { error: verifySaveError } = await admin.from('platform_payouts').update({
-      status: 'pending',
-      provider_payload: { creation_status: 'success', chapa_reference: chapaReference, verification_available: false, verification_error: 'Network interruption while checking payout status.' },
-      updated_at: new Date().toISOString(),
-    }).eq('id', reservation.id)
+    const { data: verifyResult, error: verifySaveError } = await admin.rpc('record_tiqet_platform_payout_result', {
+      p_payout_id: reservation.id,
+      p_status: 'pending',
+      p_provider_reference: chapaReference,
+      p_provider_service_fee_minor: 0,
+      p_provider_payload: { creation_status: 'success', chapa_reference: chapaReference, verification_available: false, verification_error: 'Network interruption while checking payout status.' },
+    })
     if (verifySaveError) {
       console.error('Could not persist payout verification outage', verifySaveError.message)
       return json({ error: 'Chapa accepted the payout but verification is unavailable and the status update failed. Do not retry; reconcile this withdrawal.' }, 500)
     }
-    return json({ payout_id: reservation.id, merchant_reference: reservation.merchant_reference, chapa_reference: chapaReference, status: 'pending',
+    return json({ payout_id: reservation.id, merchant_reference: reservation.merchant_reference, chapa_reference: chapaReference, status: verifyResult?.status ?? 'pending',
       message: 'Chapa accepted the payout. Verification is temporarily unavailable; the payout remains reserved. Do not submit it again.' }, 202)
   }
   const verified = verification?.data
@@ -176,27 +183,27 @@ Deno.serve(async (req) => {
     OTP_NEEDED: 'otp_needed', OTP_FAILED: 'otp_failed',
   }
   const payoutStatus = matches ? (statusMap[String(verified.status ?? '').toUpperCase()] ?? 'pending') : 'pending'
-  const { error: verificationUpdateError } = await admin.from('platform_payouts').update({
-    provider_reference: chapaReference,
-    status: payoutStatus,
-    provider_service_fee_minor: matches ? Number(verified.service_fee ?? 0) : 0,
-    provider_payload: {
+  const { data: verificationResult, error: verificationUpdateError } = await admin.rpc('record_tiqet_platform_payout_result', {
+    p_payout_id: reservation.id,
+    p_status: payoutStatus,
+    p_provider_reference: chapaReference,
+    p_provider_service_fee_minor: matches ? Number(verified.service_fee ?? 0) : 0,
+    p_provider_payload: {
       creation_status: String(result?.status ?? 'unknown'), chapa_reference: String(chapaReference),
       verification_available: matches, verified_status: matches ? String(verified.status ?? '') : 'UNKNOWN',
       amount_minor: matches ? Number(verified.amount) : amountMinor,
       currency: matches ? String(verified.currency ?? '') : 'ETB',
       provider_service_fee_minor: matches ? Number(verified.service_fee ?? 0) : 0,
     },
-    updated_at: new Date().toISOString(),
-  }).eq('id', reservation.id)
+  })
   if (verificationUpdateError) {
     console.error('Could not persist Chapa payout verification result', verificationUpdateError.message)
     return json({ error: 'Chapa accepted the payout, but its verification result could not be persisted. Do not retry; reconcile this withdrawal.' }, 500)
   }
   return json({
     payout_id: reservation.id, merchant_reference: reservation.merchant_reference,
-    chapa_reference: chapaReference, amount_etb: reservation.amount_etb, status: payoutStatus,
-    message: payoutStatus === 'succeeded'
+    chapa_reference: chapaReference, amount_etb: reservation.amount_etb, status: verificationResult?.status ?? payoutStatus,
+    message: (verificationResult?.status ?? payoutStatus) === 'succeeded'
       ? 'Chapa verified that the withdrawal succeeded.'
       : 'Withdrawal submitted. It remains reserved until Chapa confirms the final status.',
   }, 202)
