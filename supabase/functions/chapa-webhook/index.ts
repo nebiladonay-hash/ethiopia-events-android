@@ -81,18 +81,18 @@ Deno.serve(async (req) => {
     }
     const mappedStatus = mapped[providerStatus]
     if (!mappedStatus) return json({ received: true, verified: true, status_unmapped: true })
-    const { error: payoutUpdateError } = await admin.from('platform_payouts').update({
-      status: mappedStatus,
-      provider_reference: String(details.chapa_reference ?? chapaReference),
-      provider_service_fee_minor: Number(details.service_fee ?? 0),
-      provider_payload: {
+    const { data: payoutResult, error: payoutUpdateError } = await admin.rpc('record_tiqet_platform_payout_result', {
+      p_payout_id: payout.id,
+      p_status: mappedStatus,
+      p_provider_reference: String(details.chapa_reference ?? chapaReference),
+      p_provider_service_fee_minor: Number(details.service_fee ?? 0),
+      p_provider_payload: {
         chapa_reference: String(details.chapa_reference ?? chapaReference),
         merchant_reference: payout.merchant_reference, status: providerStatus,
         amount_minor: Number(details.amount), currency: String(details.currency ?? ''),
         provider_service_fee_minor: Number(details.service_fee ?? 0),
       },
-      updated_at: new Date().toISOString(),
-    }).eq('id', payout.id)
+    })
     if (payoutUpdateError) {
       console.error('Could not persist verified Chapa payout status', payoutUpdateError.message)
       return json({ error: 'Could not persist verified payout status' }, 500)
@@ -102,7 +102,7 @@ Deno.serve(async (req) => {
       provider: 'chapa_payout', payload_sha256: payloadHash, merchant_reference: merchantReference,
     }, { onConflict: 'provider,payload_sha256', ignoreDuplicates: true })
     if (payoutEventError) return json({ error: 'Could not persist payout webhook receipt' }, 500)
-    return json({ received: true, verified: true, payout_status: mappedStatus })
+    return json({ received: true, verified: true, payout_status: payoutResult?.status ?? mappedStatus, ignored_conflicting_status: payoutResult?.ignored_conflicting_status === true })
   }
 
   if (event.webhook_type === 'refund') {
