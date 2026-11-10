@@ -212,14 +212,16 @@ Deno.serve(async (req) => {
     return json({ error: 'Chapa returned refund details that do not match TIQET records. Manual review is required.', refund_id: refund.refund_id }, 409)
   }
 
-  const providerStatus = String(data.status ?? '').toUpperCase()
+  const creationStatus = String(data.status ?? '').toUpperCase()
+  // Creation acknowledgement is not settlement proof. Keep the refund pending
+  // until verify-chapa-refund confirms this exact provider reference.
   const { data: saved, error: saveError } = await admin.rpc('record_chapa_refund_result', {
     p_refund_id: refund.refund_id,
     p_provider_reference: providerReference,
-    p_provider_status: providerStatus,
+    p_provider_status: 'PENDING',
     p_provider_payload: {
       chapa_reference: providerReference, payment_reference: responsePaymentReference,
-      amount: responseAmount, currency: responseCurrency, status: providerStatus,
+      amount: responseAmount, currency: responseCurrency, creation_status: creationStatus, status: 'PENDING',
       reason: String(data.reason ?? reason), created_at: data.created_at ?? null,
       updated_at: data.updated_at ?? null,
     },
@@ -233,7 +235,7 @@ Deno.serve(async (req) => {
     provider_reference: providerReference,
     amount_minor: refund.amount_minor,
     currency: 'ETB',
-    status: saved.status ?? providerStatus.toLowerCase(),
+    status: saved.status ?? 'pending',
     requires_manual_reconciliation: true,
   })
 })
