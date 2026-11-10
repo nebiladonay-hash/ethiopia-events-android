@@ -36,6 +36,11 @@ create index if not exists payment_refunds_payment_status_idx
 create index if not exists payment_refunds_created_at_idx
   on public.payment_refunds(created_at desc);
 
+-- A partially refunded payment remains refundable up to its verified balance.
+alter table public.payments drop constraint if exists payments_status_check;
+alter table public.payments add constraint payments_status_check
+  check (status = any (array['initiated','pending','succeeded','failed','review','cancelled','refunded','partially_refunded']));
+
 alter table public.payment_refunds enable row level security;
 revoke all on table public.payment_refunds from public, anon, authenticated;
 grant all on table public.payment_refunds to service_role;
@@ -102,7 +107,7 @@ begin
   if not found then raise exception 'Payment not found'; end if;
   if v_payment.provider <> 'chapa' then raise exception 'Only Chapa payments can use this refund endpoint'; end if;
   if v_payment.currency <> 'ETB' then raise exception 'Only ETB payments can be refunded through this workflow'; end if;
-  if v_payment.status <> 'succeeded' then raise exception 'Payment must be verified and successful before a refund can be requested'; end if;
+  if v_payment.status not in ('succeeded','partially_refunded') then raise exception 'Payment must be verified and successful before a refund can be requested'; end if;
   if coalesce(v_payment.provider_payment_reference, v_payment.provider_reference) is null then
     raise exception 'Verified Chapa payment reference is missing';
   end if;
@@ -222,7 +227,7 @@ begin
 
     update public.payments
     set refunded_amount_minor=v_new_refunded_total,
-        status=case when v_new_refunded_total = amount_minor then 'refunded' else 'review' end,
+        status=case when v_new_refunded_total = amount_minor then 'refunded' else 'partially_refunded' end,
         updated_at=now()
     where id=v_payment.id;
 
@@ -318,6 +323,115 @@ begin
     ),'[]'::jsonb)
   ) into v_result;
   return v_result;
+end;
+$function$;
+
+
+-- Webhook amounts are cumulative for the payment, not per-refund identifiers.
+-- An alert is auto-reconciled only when it matches the amount already verified
+-- through individual refund references.
+create or replace function public.record_chapa_refund_notice(
+  p_merchant_reference text,
+  p_payload_sha256 text,
+  p_event_name text,
+  p_provider_status text,
+  p_original_amount_minor bigint,
+  p_refunded_amount_minor bigint,
+  p_currency text,
+  p_provider_payload jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path to ''
+as $function$
+declare
+  v_payment public.payments%rowtype;
+  v_order public.orders%rowtype;
+  v_alert_id uuid;
+  v_reconciled boolean := false;
+begin
+  if p_event_name is null or p_event_name not in ('payment.partially_refunded','payment.fully_refunded') then
+    raise exception 'Unsupported refund event';
+  end if;
+  if p_provider_status is null or p_provider_status not in ('partially_refunded','fully_refunded') then
+    raise exception 'Unsupported refund status';
+  end if;
+  if p_currency is distinct from 'ETB' or p_payload_sha256 is null or p_payload_sha256 !~ '^[a-f0-9]{64}(uuid,bigint,text,text,uuid) from public, anon, authenticated;
+grant execute on function public.reserve_chapa_refund(uuid,bigint,text,text,uuid) to service_role;
+revoke all on function public.record_chapa_refund_result(uuid,text,text,jsonb,text) from public, anon, authenticated;
+grant execute on function public.record_chapa_refund_result(uuid,text,text,jsonb,text) to service_role;
+revoke all on function public.get_tiqet_refunds_dashboard(integer) from public, anon;
+grant execute on function public.get_tiqet_refunds_dashboard(integer) to authenticated;
+
+commit;
+ then
+    raise exception 'Invalid refund currency or payload digest';
+  end if;
+  if p_original_amount_minor is null or p_original_amount_minor <= 0
+     or p_refunded_amount_minor is null or p_refunded_amount_minor <= 0
+     or p_refunded_amount_minor > p_original_amount_minor then
+    raise exception 'Invalid refund amount';
+  end if;
+  if p_event_name = 'payment.fully_refunded' and p_refunded_amount_minor <> p_original_amount_minor then
+    raise exception 'Full refund amount does not match original payment';
+  end if;
+  if p_event_name = 'payment.partially_refunded' and p_refunded_amount_minor >= p_original_amount_minor then
+    raise exception 'Partial refund amount is not partial';
+  end if;
+
+  select * into v_payment
+  from public.payments
+  where merchant_reference = p_merchant_reference
+  for update;
+  if not found then raise exception 'Payment reference not found'; end if;
+  if v_payment.amount_minor <> p_original_amount_minor or v_payment.currency <> p_currency then
+    raise exception 'Refund notice does not match original payment';
+  end if;
+
+  select * into v_order from public.orders where id = v_payment.order_id for update;
+  if not found then raise exception 'Order not found'; end if;
+  if v_order.status not in ('paid','payment_review','refunded') then
+    raise exception 'Refund notice received for an order not marked paid';
+  end if;
+
+  insert into public.payment_refund_alerts(
+    payment_id, order_id, merchant_reference, event_name, provider_status,
+    original_amount_minor, refunded_amount_minor, currency, payload_sha256, provider_payload
+  ) values (
+    v_payment.id, v_order.id, p_merchant_reference, p_event_name, p_provider_status,
+    p_original_amount_minor, p_refunded_amount_minor, p_currency, p_payload_sha256,
+    coalesce(p_provider_payload,'{}'::jsonb)
+  ) on conflict (payload_sha256) do nothing
+  returning id into v_alert_id;
+
+  insert into public.webhook_events(provider, payload_sha256, merchant_reference)
+  values ('chapa_refund', p_payload_sha256, p_merchant_reference)
+  on conflict (provider, payload_sha256) do nothing;
+
+  v_reconciled := coalesce(v_payment.refunded_amount_minor,0) = p_refunded_amount_minor;
+  if v_reconciled then
+    update public.payment_refund_alerts
+    set review_status='reconciled', reconciled_at=now()
+    where payload_sha256=p_payload_sha256;
+  else
+    update public.payments
+    set status='review',
+        provider_payload=coalesce(provider_payload,'{}'::jsonb) ||
+          jsonb_build_object('refund_notice_received',true,'latest_refund_event',p_event_name,
+                             'latest_refunded_amount_minor',p_refunded_amount_minor),
+        updated_at=now()
+    where id=v_payment.id and status <> 'refunded';
+
+    update public.orders set status='payment_review', updated_at=now()
+    where id=v_order.id and status in ('paid','payment_review');
+  end if;
+
+  return jsonb_build_object(
+    'recorded',true,'duplicate',v_alert_id is null,
+    'order_id',v_order.id,
+    'manual_reconciliation_required',not v_reconciled
+  );
 end;
 $function$;
 
