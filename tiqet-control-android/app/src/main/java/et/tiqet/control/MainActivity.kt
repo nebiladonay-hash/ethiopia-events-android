@@ -1238,6 +1238,10 @@ private fun FinanceScreen(
     finance: JSONObject,
     refundsDashboard: JSONObject,
     busy: Boolean,
+    isPlatformOwner: Boolean,
+    payoutDestinations: JSONArray,
+    onLoadPayoutDestinations: () -> Unit,
+    onCreatePlatformPayout: (amountMinor: Long, bankSlug: String, bankName: String, accountName: String, accountNumber: String) -> Unit,
     onRequestRefund: (paymentId: String, amountMinor: Long?, reason: String, idempotencyKey: String) -> Unit,
     onVerifyRefund: (refundId: String) -> Unit,
     onRefresh: () -> Unit
@@ -1253,6 +1257,15 @@ private fun FinanceScreen(
     var reason by remember { mutableStateOf("") }
     var idempotencyKey by remember { mutableStateOf("") }
     var formError by remember { mutableStateOf<String?>(null) }
+    var showPayoutDialog by remember { mutableStateOf(false) }
+    var payoutAmountEtb by remember { mutableStateOf("") }
+    var payoutAccountName by remember { mutableStateOf("") }
+    var payoutAccountNumber by remember { mutableStateOf("") }
+    var selectedDestinationSlug by remember { mutableStateOf("") }
+    var payoutMenuExpanded by remember { mutableStateOf(false) }
+    var payoutFormError by remember { mutableStateOf<String?>(null) }
+    val destinations = (0 until payoutDestinations.length()).mapNotNull { payoutDestinations.optJSONObject(it) }
+    val selectedDestination = destinations.firstOrNull { it.optString("slug") == selectedDestinationSlug }
     val organiserPayouts = finance.optJSONArray("organiser_payout_requests") ?: JSONArray()
 
     fun money(value: Double): String = "ETB " + String.format(Locale.US, "%,.2f", value)
@@ -1398,7 +1411,37 @@ private fun FinanceScreen(
                 }
             }
         }
-        item { FinanceSectionTitle("Platform withdrawals",platformPayouts.length()) }
+        item {
+            Row(verticalAlignment=Alignment.CenterVertically) {
+                Text("Platform withdrawals",color=Ink,fontSize=13.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
+                Text(platformPayouts.length().toString(),color=Muted,fontSize=10.sp)
+                if (isPlatformOwner) {
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            payoutAmountEtb = ""
+                            payoutAccountName = ""
+                            payoutAccountNumber = ""
+                            selectedDestinationSlug = ""
+                            payoutFormError = null
+                            showPayoutDialog = true
+                            onLoadPayoutDestinations()
+                        },
+                        enabled = !busy,
+                        contentPadding = PaddingValues(horizontal=10.dp, vertical=6.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor=Ink)
+                    ) { Text("Withdraw",fontSize=10.sp) }
+                }
+            }
+        }
+        if (isPlatformOwner) {
+            item {
+                Text(
+                    "Withdrawals are restricted to the platform owner. Chapa verifies the destination and available balance before a request is reserved.",
+                    color=Muted,fontSize=10.sp,lineHeight=15.sp
+                )
+            }
+        }
         if(platformPayouts.length()==0) {
             item { Text("No platform withdrawals recorded.",color=Muted,fontSize=11.sp) }
         } else {
@@ -1430,6 +1473,128 @@ private fun FinanceScreen(
                 color=Muted,fontSize=10.sp,lineHeight=15.sp
             )
         }
+    }
+
+    if (showPayoutDialog) {
+        val parsedPayoutAmount = if (payoutAmountEtb.isBlank()) null else runCatching {
+            java.math.BigDecimal(payoutAmountEtb.trim())
+                .movePointRight(2)
+                .setScale(0, java.math.RoundingMode.UNNECESSARY)
+                .longValueExact()
+        }.getOrNull()
+        AlertDialog(
+            onDismissRequest = {
+                if (!busy) {
+                    showPayoutDialog = false
+                    payoutAccountNumber = ""
+                }
+            },
+            title = { Text("Withdraw platform revenue",color=Ink,fontWeight=FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier.heightIn(max=480.dp).verticalScroll(androidx.compose.ui.unit.Constraints.Infinity.let { androidx.compose.foundation.rememberScrollState() }),
+                    verticalArrangement = Arrangement.spacedBy(9.dp)
+                ) {
+                    Text(
+                        "Request a Chapa transfer from TIQET's platform balance to a verified bank or wallet account. The server checks available funds and retains the request for reconciliation.",
+                        color=Muted,fontSize=10.sp,lineHeight=15.sp
+                    )
+                    OutlinedTextField(
+                        value=payoutAmountEtb,
+                        onValueChange={payoutAmountEtb=it;payoutFormError=null},
+                        modifier=Modifier.fillMaxWidth(),
+                        label={Text("Amount in ETB")},
+                        placeholder={Text("Minimum 1.00")},
+                        singleLine=true,
+                        keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal)
+                    )
+                    Box(Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick={ payoutMenuExpanded = true },
+                            modifier=Modifier.fillMaxWidth(),
+                            enabled=destinations.isNotEmpty()
+                        ) {
+                            Text(selectedDestination?.optString("name") ?: if(destinations.isEmpty()) "Loading payout destinations…" else "Choose bank or wallet")
+                        }
+                        DropdownMenu(
+                            expanded=payoutMenuExpanded,
+                            onDismissRequest={payoutMenuExpanded=false},
+                            modifier=Modifier.heightIn(max=260.dp)
+                        ) {
+                            destinations.forEach { destination ->
+                                DropdownMenuItem(
+                                    text={Text(destination.optString("name") + " · " + destination.optString("type","bank"))},
+                                    onClick={
+                                        selectedDestinationSlug=destination.optString("slug")
+                                        payoutMenuExpanded=false
+                                        payoutFormError=null
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value=payoutAccountName,
+                        onValueChange={payoutAccountName=it;payoutFormError=null},
+                        modifier=Modifier.fillMaxWidth(),
+                        label={Text("Account holder name")},
+                        singleLine=true
+                    )
+                    OutlinedTextField(
+                        value=payoutAccountNumber,
+                        onValueChange={payoutAccountNumber=it.filter(Char::isDigit);payoutFormError=null},
+                        modifier=Modifier.fillMaxWidth(),
+                        label={Text("Bank or wallet account number")},
+                        singleLine=true,
+                        keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number)
+                    )
+                    Text(
+                        "Only the last four digits are stored by TIQET. Do not submit another withdrawal while an earlier request is pending or uncertain.",
+                        color=Muted,fontSize=10.sp,lineHeight=14.sp
+                    )
+                    if (payoutFormError != null) Text(payoutFormError!!,color=Danger,fontSize=10.sp)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cleanName=payoutAccountName.trim()
+                        val cleanNumber=payoutAccountNumber.trim()
+                        when {
+                            parsedPayoutAmount == null || parsedPayoutAmount < 100 ->
+                                payoutFormError="Enter an amount with up to two decimal places (minimum ETB 1.00)."
+                            selectedDestination == null ->
+                                payoutFormError="Choose an active Chapa bank or wallet destination."
+                            cleanName.length < 2 ->
+                                payoutFormError="Enter the account holder name."
+                            !cleanNumber.matches(Regex("^[0-9]{6,30}$")) ->
+                                payoutFormError="Enter a valid account number (6 to 30 digits)."
+                            else -> {
+                                onCreatePlatformPayout(
+                                    parsedPayoutAmount,
+                                    selectedDestinationSlug,
+                                    selectedDestination.optString("name"),
+                                    cleanName,
+                                    cleanNumber
+                                )
+                                showPayoutDialog=false
+                                payoutAccountNumber=""
+                            }
+                        }
+                    },
+                    enabled=!busy,
+                    colors=ButtonDefaults.buttonColors(containerColor=Ink)
+                ) { Text("Submit withdrawal") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick={showPayoutDialog=false;payoutAccountNumber=""},
+                    enabled=!busy
+                ) { Text("Cancel",color=Muted) }
+            },
+            shape=RoundedCornerShape(20.dp),
+            containerColor=CardWhite
+        )
     }
 
     if (selectedPayment != null) {
