@@ -1,0 +1,28 @@
+name: Validate organiser payout review endpoint
+
+on:
+  push:
+    branches: [tiqet-organiser-payout-review]
+    paths:
+      - "supabase/functions/tiqet-admin-organiser-payout/**"
+      - ".github/workflows/validate-organiser-payout-review.yml"
+  pull_request:
+    paths:
+      - "supabase/functions/tiqet-admin-organiser-payout/**"
+      - ".github/workflows/validate-organiser-payout-review.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  deno-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Type-check organiser payout endpoint
+        run: deno check supabase/functions/tiqet-admin-organiser-payout/index.ts
