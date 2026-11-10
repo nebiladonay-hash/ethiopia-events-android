@@ -96,9 +96,10 @@ jobs:
             # payment-method UI patch already replaced that exact line with the
             # method-aware call, so accept only this precise, already-applied
             # overlap; all other rejects remain fatal.
-            grep -q -- '-.*api.createChapaCheckout(ticketTypeId, ticketCount)' "$REJECTS"
-            grep -q -- '+.*selectedPaymentMethod.takeIf' "$REJECTS"
-            grep -q 'api.createChapaCheckout(ticketTypeId, ticketCount, selectedPaymentMethod.takeIf' "$MAIN_ACTIVITY"
+            grep -Fq '@@ -762,7 +779,7 @@' "$REJECTS"
+            grep -Fq 'api.createChapaCheckout(ticketTypeId, ticketCount)' "$REJECTS"
+            grep -Fq 'selectedPaymentMethod.takeIf' "$REJECTS"
+            grep -Fq 'api.createChapaCheckout(ticketTypeId, ticketCount, selectedPaymentMethod.takeIf' "$MAIN_ACTIVITY"
             test "$(grep -c '^@@' "$REJECTS")" -eq 1
             rm "$REJECTS"
           fi
