@@ -107,10 +107,13 @@ jobs:
           source = path.read_text()
           old = "api.createChapaCheckout(ticketTypeId, ticketCount)"
           new = "api.createChapaCheckout(ticketTypeId, ticketCount, selectedPaymentMethod.takeIf { it.isNotBlank() })"
-          if source.count(old) != 1:
-              raise SystemExit("Expected exactly one original Chapa checkout call to update.")
-          path.write_text(source.replace(old, new, 1))
-          print("Applied the exact method-aware checkout argument from the single rejected patch hunk.")
+          if source.count(new) == 1:
+              print("The payment-method patch already supplied the method-aware checkout argument.")
+          elif source.count(old) == 1:
+              path.write_text(source.replace(old, new, 1))
+              print("Applied the exact method-aware checkout argument from the single rejected patch hunk.")
+          else:
+              raise SystemExit("Expected one original or one method-aware Chapa checkout call; found neither uniquely.")
           PY
               grep -Fq 'api.createChapaCheckout(ticketTypeId, ticketCount, selectedPaymentMethod.takeIf' "$MAIN_ACTIVITY"
               rm "$REJECTS"
