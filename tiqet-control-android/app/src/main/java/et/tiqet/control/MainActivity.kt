@@ -218,7 +218,8 @@ private enum class ControlTab(val label: String) {
     EVENTS("Events"),
     TEAM("Team"),
     ACTIVITY("Activity"),
-    FINANCE("Finance")
+    FINANCE("Finance"),
+    USERS("Users")
 }
 
 @Composable
@@ -274,6 +275,7 @@ private fun ControlWorkspace(
         if (isSuperAdmin) add(ControlTab.TEAM)
         if (isAdmin) add(ControlTab.ACTIVITY)
         if (isAdmin) add(ControlTab.FINANCE)
+        if (isAdmin) add(ControlTab.USERS)
     }
 
     Column(
@@ -395,6 +397,12 @@ private fun ControlWorkspace(
                 )
                 ControlTab.ACTIVITY -> ActivityScreen(entries = audit, busy = busy)
                 ControlTab.FINANCE -> FinanceScreen(finance = finance, busy = busy)
+                ControlTab.USERS -> UserModerationScreen(
+                    api = api,
+                    session = session,
+                    onChanged = { notice = it; refresh() },
+                    onError = { error = it }
+                )
             }
         }
     }
@@ -472,6 +480,13 @@ private fun OverviewScreen(
                     title = "Financial monitoring",
                     subtitle = "Payments, refunds, revenue and payout status",
                     onClick = { onOpenTab(ControlTab.FINANCE) }
+                )
+            }
+            item {
+                QueueShortcut(
+                    title = "User moderation",
+                    subtitle = "Search accounts, suspend future sign-ins and restore access",
+                    onClick = { onOpenTab(ControlTab.USERS) }
                 )
             }
             item {
@@ -762,6 +777,142 @@ private fun TeamScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun UserModerationScreen(
+    api: SupabaseApi,
+    session: ControlSession,
+    onChanged: (String) -> Unit,
+    onError: (String) -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    var reason by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf(JSONArray()) }
+    var busy by remember { mutableStateOf(false) }
+    var selectedUser by remember { mutableStateOf<JSONObject?>(null) }
+    var selectedAction by remember { mutableStateOf("suspend") }
+    var selectedDuration by remember { mutableStateOf("24h") }
+    var showConfirm by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Column(Modifier.fillMaxSize().padding(horizontal=16.dp)) {
+        ScreenHeading("User moderation", "Review accounts and restrict future sign-ins when necessary.")
+        OutlinedTextField(
+            value=query, onValueChange={query=it},
+            modifier=Modifier.fillMaxWidth(), label={Text("Search by email")},
+            singleLine=true, shape=RoundedCornerShape(13.dp)
+        )
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick={
+                scope.launch {
+                    busy=true
+                    try { results=api.searchUsers(session,query.trim()) }
+                    catch(e:Exception){ onError(e.message ?: "Search failed.") }
+                    finally { busy=false }
+                }
+            },
+            enabled=!busy && query.trim().length>=3,
+            modifier=Modifier.fillMaxWidth().height(45.dp),
+            colors=ButtonDefaults.buttonColors(containerColor=Ink),
+            shape=RoundedCornerShape(12.dp)
+        ) { Text(if(busy) "Searching…" else "Search accounts") }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Temporary bans block new sign-ins for the selected period. Existing access tokens are not immediately revoked.",
+            color=Muted,fontSize=10.sp,lineHeight=15.sp
+        )
+        Spacer(Modifier.height(10.dp))
+        if(results.length()==0) {
+            EmptyState("No accounts loaded","Search by email to find an account.")
+        } else {
+            LazyColumn(verticalArrangement=Arrangement.spacedBy(9.dp),contentPadding=PaddingValues(bottom=24.dp)) {
+                items((0 until results.length()).mapNotNull{results.optJSONObject(it)},key={it.optString("user_id")}) { user ->
+                    val staffRole=user.optString("staff_role")
+                    val banValue=user.optString("banned_until")
+                    val banned=banValue.isNotBlank()
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(CardWhite).padding(13.dp)) {
+                        Text(user.optString("email"),color=Ink,fontSize=12.sp,fontWeight=FontWeight.Bold)
+                        if(user.optString("full_name").isNotBlank()) Text(user.optString("full_name"),color=Muted,fontSize=10.sp)
+                        Text(if(banned) "Ban expiry: $banValue" else "No active ban recorded",color=if(banned) Danger else Teal,fontSize=10.sp)
+                        if(staffRole.isNotBlank()) {
+                            Text("Staff account: $staffRole. Manage staff access in the Team section.",color=Muted,fontSize=10.sp)
+                        } else {
+                            OutlinedTextField(
+                                value=reason,onValueChange={reason=it},
+                                modifier=Modifier.fillMaxWidth(),
+                                label={Text("Reason for moderation")},
+                                singleLine=true,shape=RoundedCornerShape(11.dp)
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Row(horizontalArrangement=Arrangement.spacedBy(5.dp)) {
+                                listOf("24h" to "24h","168h" to "7d","720h" to "30d").forEach { (duration,label) ->
+                                    OutlinedButton(
+                                        onClick={selectedUser=user;selectedAction="suspend";selectedDuration=duration;showConfirm=true},
+                                        enabled=!busy,
+                                        modifier=Modifier.weight(1f),
+                                        shape=RoundedCornerShape(10.dp),
+                                        contentPadding=PaddingValues(horizontal=3.dp,vertical=7.dp)
+                                    ) { Text("Suspend $label",fontSize=9.sp) }
+                                }
+                            }
+                            if(banned) {
+                                TextButton(
+                                    onClick={selectedUser=user;selectedAction="restore";selectedDuration="";showConfirm=true},
+                                    enabled=!busy
+                                ) { Text("Restore sign-in access",color=Teal,fontSize=10.sp) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    val target=selectedUser
+    if(showConfirm && target!=null) {
+        AlertDialog(
+            onDismissRequest={showConfirm=false},
+            title={Text(if(selectedAction=="suspend") "Confirm suspension" else "Restore access")},
+            text={
+                Column {
+                    Text(
+                        if(selectedAction=="suspend")
+                            "Suspend future sign-ins for this account for $selectedDuration? Existing access tokens may still work until expiry."
+                        else
+                            "Clear the sign-in ban for this account?",
+                        fontSize=12.sp
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text("Reason: $reason",fontSize=11.sp,color=Muted)
+                }
+            },
+            confirmButton={
+                Button(
+                    onClick={
+                        val action=selectedAction
+                        val duration=if(action=="suspend") selectedDuration else null
+                        showConfirm=false
+                        scope.launch {
+                            busy=true
+                            try {
+                                api.moderateUser(session,target.optString("user_id"),action,duration,reason.trim())
+                                onChanged(if(action=="suspend") "Account sign-in suspended." else "Account sign-in restored.")
+                                reason=""
+                                results=api.searchUsers(session,query.trim())
+                            } catch(e:Exception) {
+                                onError(e.message ?: "Moderation action failed.")
+                            } finally { busy=false }
+                        }
+                    },
+                    enabled=reason.trim().length in 5..500,
+                    colors=ButtonDefaults.buttonColors(containerColor=if(selectedAction=="suspend") Danger else Teal)
+                ) { Text(if(selectedAction=="suspend") "Suspend" else "Restore") }
+            },
+            dismissButton={ TextButton(onClick={showConfirm=false}) { Text("Cancel") } }
+        )
     }
 }
 
