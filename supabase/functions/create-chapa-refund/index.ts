@@ -98,6 +98,9 @@ Deno.serve(async (req) => {
   if (refund.status === 'succeeded' || refund.status === 'failed') {
     return json({ refund_id: refund.refund_id, status: refund.status, amount_minor: refund.amount_minor, duplicate: true })
   }
+  if (refund.status === 'review') {
+    return json({ error: 'This refund is in manual review and cannot be resubmitted automatically.', refund_id: refund.refund_id }, 409)
+  }
   if (refund.provider_reference) {
     return json({
       refund_id: refund.refund_id, merchant_reference: refund.merchant_reference,
