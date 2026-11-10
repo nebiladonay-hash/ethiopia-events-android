@@ -26,7 +26,8 @@ The existing Tiqet core schema was already present before this connected product
 - `20261110051948_tiqet_control_staff_roles_and_review_workflow`
 - `20261110052005_tiqet_control_staff_directory_and_audit_access`
 - `20261110052251_tiqet_control_user_search`
-- `20261110053100_tiqet_control_finance_monitoring`
+- `20261110052734_tiqet_control_finance_monitoring`
+- `20261110053407_tiqet_control_user_moderation`
 
 The remote schema contains 24 public tables; all observed public tables have RLS enabled. Internal accounting/provider/webhook tables are service-role-only. The production migration history does **not** yet represent the older baseline schema files in the V7.1 archive. Do not run `supabase db push` from the archive until the baseline is reconciled. The GitHub backend workflow is currently a package/source verification workflow only and does not push schema changes.
 
@@ -166,3 +167,15 @@ The current companion-app source is an initial functional control MVP. Account s
 - Full bank account numbers and raw provider payloads are not returned. Platform payout destinations are masked to bank name and last four digits.
 - The Control app uses this endpoint for read-only financial monitoring. It does not initiate refunds, approve/execute payouts or move money.
 - A rollback-only SQL smoke test called the RPC as the bootstrapped super-admin; it returned the expected zero-value / empty result for the empty database.
+
+
+### User moderation and account suspension
+
+- `tiqet_user_moderation_log` stores actor, target, duration, reason, status, provider/Auth expiry and outcome for each account suspension/restoration attempt. The table is RLS-enabled and service-role-only.
+- `search_tiqet_users` is admin-only and returns basic profile data, last sign-in timestamp, current Auth ban expiry and staff-role marker.
+- `get_tiqet_user_moderation_history` is admin-only and returns a user's moderation history.
+- The `tiqet-admin-user-action` Edge Function performs Auth Admin suspension/restoration. It requires a valid JWT and independently verifies the caller's Tiqet admin role.
+- The endpoint blocks self-suspension, super-admin targets and all staff-role targets. Staff access changes remain a separate super-admin operation.
+- Supported temporary bans: 24 hours, 7 days and 30 days. Restore clears the ban.
+- A temporary Auth ban blocks new sign-ins during the ban period; it does not immediately invalidate already-issued access tokens. Backend authorization must remain enforced on sensitive actions.
+- No user has been suspended or restored as part of development/testing.
