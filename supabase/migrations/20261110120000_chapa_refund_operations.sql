@@ -137,7 +137,7 @@ declare
   v_new_refunded bigint;
   v_status text := lower(coalesce(p_status,''));
 begin
-  if auth.role() <> 'service_role' then
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
     raise exception 'Service role required';
   end if;
   if p_refund_id is null or v_status not in ('pending','submission_unknown','succeeded','failed','review') then
@@ -248,7 +248,7 @@ declare
   v_payment public.payments%rowtype;
   v_verified_total bigint := 0;
 begin
-  if auth.role() <> 'service_role' then
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
     raise exception 'Service role required';
   end if;
   if p_merchant_reference is null or btrim(p_merchant_reference) = '' or
