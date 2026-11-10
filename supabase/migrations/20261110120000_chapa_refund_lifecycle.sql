@@ -203,7 +203,11 @@ begin
   select * into v_payment from public.payments where id = v_refund.payment_id for update;
   if not found then raise exception 'Related payment not found'; end if;
 
-  if v_status = 'succeeded' then
+  if v_status = 'review' then
+    update public.payments set status='review', updated_at=now() where id=v_payment.id;
+    update public.orders set status='payment_review', updated_at=now()
+    where id=v_payment.order_id and status in ('paid','payment_review');
+  elsif v_status = 'succeeded' then
     v_new_refunded_total := coalesce(v_payment.refunded_amount_minor,0) + v_refund.amount_minor;
     if v_new_refunded_total > v_payment.amount_minor then
       update public.payment_refunds
