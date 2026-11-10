@@ -57,7 +57,10 @@ Deno.serve(async (req) => {
       { headers: { Authorization: `Bearer ${chapaPrivateKey}` } })
     const verified = await verifyResponse.json().catch(() => ({}))
     const details = verified?.data
-    if (!verifyResponse.ok || verified?.status !== 'success' || !details) return json({ received: true, verified: false })
+    if (!verifyResponse.ok || verified?.status !== 'success' || !details) {
+      console.error('Chapa payout verification is temporarily unavailable')
+      return json({ error: 'Chapa payout verification is temporarily unavailable; retry this webhook' }, 503)
+    }
     if (String(details.merchant_reference ?? '') !== payout.merchant_reference ||
         String(details.currency ?? '') !== 'ETB' || Number(details.amount) !== Number(payout.amount_minor)) {
       return json({ error: 'Verified payout does not match the stored withdrawal' }, 409)
