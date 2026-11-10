@@ -22,6 +22,8 @@ Deno.serve(async (req) => {
   const chapaKey = Deno.env.get('CHAPA_PRIVATE_KEY')
   const chapaMode = Deno.env.get('CHAPA_MODE')?.toLowerCase()
   if (!chapaKey || !['test', 'live'].includes(chapaMode ?? '')) return json({ error: 'Set CHAPA_PRIVATE_KEY and CHAPA_MODE (test or live) in Supabase secrets' }, 503)
+  const keyMode = chapaKey.startsWith('CHAPA_TEST_') ? 'test' : chapaKey.startsWith('CHAPA_LIVE_') ? 'live' : null
+  if (keyMode && keyMode !== chapaMode) return json({ error: 'Chapa API key environment does not match CHAPA_MODE' }, 503)
   if (chapaMode === 'live' && Deno.env.get('TIQET_LIVE_MARKETPLACE_APPROVED') !== 'true') {
     return json({ error: 'Live checkout is locked until Tiqet has written marketplace approval and merchant activation from Chapa.' }, 403)
   }
