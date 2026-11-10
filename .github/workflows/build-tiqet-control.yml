@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - tiqet-control-v1
+      - tiqet-refund-backend-v1
     paths:
       - 'tiqet-control-android/**'
       - '.github/workflows/build-tiqet-control.yml'
