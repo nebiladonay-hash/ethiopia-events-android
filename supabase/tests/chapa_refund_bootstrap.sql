@@ -36,21 +36,13 @@ CREATE OR REPLACE FUNCTION auth.role()
 RETURNS text
 LANGUAGE sql
 STABLE
-AS $
-  SELECT nullif(current_setting('request.jwt.claim.role', true), '')
-$;
+AS 'SELECT nullif(current_setting(''request.jwt.claim.role'', true), '''')';
 
 CREATE OR REPLACE FUNCTION auth.jwt()
 RETURNS jsonb
 LANGUAGE sql
 STABLE
-AS $
-  SELECT jsonb_build_object(
-    'sub', nullif(current_setting('request.jwt.claim.sub', true), ''),
-    'role', nullif(current_setting('request.jwt.claim.role', true), '')
-  )
-$;
-
+AS 'SELECT jsonb_build_object(''sub'', nullif(current_setting(''request.jwt.claim.sub'', true), ''''), ''role'', nullif(current_setting(''request.jwt.claim.role'', true), ''''))';
 CREATE TYPE public.order_status AS ENUM (
   'payment_pending',
   'paid',
