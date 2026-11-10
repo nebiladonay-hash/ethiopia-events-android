@@ -10,7 +10,8 @@ val tiqetSupabaseKey = providers.environmentVariable("SUPABASE_ANON_KEY")
 
 android {
     namespace = "et.tiqet.control"
-    compileSdk = 36
+    compileSdk = 37
+    compileSdkMinor = 2
 
     defaultConfig {
         applicationId = "et.tiqet.control"
