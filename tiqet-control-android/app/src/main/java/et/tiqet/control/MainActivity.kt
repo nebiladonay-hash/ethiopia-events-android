@@ -436,7 +436,7 @@ private fun ControlWorkspace(
                             error = null
                             try {
                                 val result = api.createChapaRefund(session, paymentId, amountMinor, reason, idempotencyKey)
-                                notice = "Chapa refund request recorded: \${result.optString("status", "pending")}. Verify the individual refund before closing the finance review."
+                                notice = "Chapa refund request recorded: ${result.optString("status", "pending")}. Verify the individual refund before closing the finance review."
                                 finance = api.getFinanceDashboard(session)
                                 refundsDashboard = api.getRefundsDashboard(session)
                             } catch (e: Exception) {
@@ -452,7 +452,7 @@ private fun ControlWorkspace(
                             error = null
                             try {
                                 val result = api.verifyChapaRefund(session, refundId)
-                                notice = "Chapa refund verification: \${result.optString("status", "unknown")}. Ticket and settlement reconciliation remains in the finance review queue."
+                                notice = "Chapa refund verification: ${result.optString("status", "unknown")}. Ticket and settlement reconciliation remains in the finance review queue."
                                 finance = api.getFinanceDashboard(session)
                                 refundsDashboard = api.getRefundsDashboard(session)
                             } catch (e: Exception) {
@@ -1301,8 +1301,8 @@ private fun FinanceScreen(
                         StatusPill(row.optString("status"))
                     }
                     Text(row.optString("reason"),color=Muted,fontSize=10.sp)
-                    Text("Payment: \${row.optString("payment_merchant_reference")}",color=Muted,fontSize=9.sp)
-                    Text("Refund ref: \${row.optString("provider_reference").ifBlank { row.optString("merchant_reference") }}",color=Muted,fontSize=9.sp)
+                    Text("Payment: ${row.optString("payment_merchant_reference")}",color=Muted,fontSize=9.sp)
+                    Text("Refund ref: ${row.optString("provider_reference").ifBlank { row.optString("merchant_reference") }}",color=Muted,fontSize=9.sp)
                     if (row.optString("status") in listOf("requested","pending") &&
                         row.optString("provider_reference").isNotBlank()) {
                         TextButton(
@@ -1394,7 +1394,7 @@ private fun FinanceScreen(
             text = {
                 Column(verticalArrangement=Arrangement.spacedBy(9.dp)) {
                     Text(
-                        "Payment \${payment.optString("merchant_reference")} · \${amount(payment)}",
+                        "Payment ${payment.optString("merchant_reference")} · ${amount(payment)}",
                         color=Muted,fontSize=11.sp
                     )
                     OutlinedTextField(
