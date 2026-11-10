@@ -51,8 +51,10 @@ Deno.serve(async (req) => {
   })
   if (holdError || !hold?.order_id) return json({ error: holdError?.message ?? 'Could not reserve tickets' }, 409)
 
-  const failHold = async (reason: string) => {
-    await admin.rpc('fail_order_payment', { p_order_id: hold.order_id, p_reason: reason })
+  const failHold = async (reason: string): Promise<boolean> => {
+    const { error } = await admin.rpc('fail_order_payment', { p_order_id: hold.order_id, p_reason: reason })
+    if (error) console.error('Could not release failed checkout hold', error.message)
+    return !error
   }
   const { data: item, error: itemError } = await admin
     .from('order_items').select('event_id').eq('order_id', hold.order_id).single()
@@ -99,7 +101,8 @@ Deno.serve(async (req) => {
       })
       methodsJson = await methodsResponse.json().catch(() => ({}))
     } catch {
-      await failHold('Could not reach Chapa to validate the selected payment method')
+      const released = await failHold('Could not reach Chapa to validate the selected payment method')
+      if (!released) return json({ error: 'Chapa is unreachable and TIQET could not confirm release of the ticket hold. Contact support before retrying.' }, 500)
       return json({ error: 'Chapa is temporarily unreachable. Your ticket reservation was released; please try again.' }, 503)
     }
     const methods = Array.isArray(methodsJson?.data) ? methodsJson.data : []
@@ -185,7 +188,8 @@ Deno.serve(async (req) => {
     })
     chapa = await chapaResponse.json().catch(() => ({}))
   } catch {
-    await failHold('Chapa checkout initialization response was unavailable; order hold released for safety')
+    const released = await failHold('Chapa checkout initialization response was unavailable; order hold released for safety')
+    if (!released) return json({ error: 'Chapa did not respond and TIQET could not confirm release of the ticket hold. Contact support before retrying.' }, 500)
     const { error: outcomeMetadataError } = await admin.from('payments').update({
       failure_code: 'checkout_initialization_unknown',
       failure_message: 'Chapa did not return a checkout response. The order hold was released; reconcile any late provider notification before issuing tickets.',
