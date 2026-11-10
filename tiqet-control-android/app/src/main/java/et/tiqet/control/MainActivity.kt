@@ -1,0 +1,813 @@
+package et.tiqet.control
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import et.tiqet.control.data.ApiException
+import et.tiqet.control.data.ControlSession
+import et.tiqet.control.data.SupabaseApi
+import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
+
+private val Ink = Color(0xFF152C2A)
+private val Muted = Color(0xFF75837E)
+private val Canvas = Color(0xFFF4F6F3)
+private val CardWhite = Color(0xFFFFFFFF)
+private val Accent = Color(0xFFE36B4F)
+private val AccentPale = Color(0xFFFFEEE8)
+private val Teal = Color(0xFF347D71)
+private val TealPale = Color(0xFFE4F1ED)
+private val Border = Color(0xFFE3E9E4)
+private val Danger = Color(0xFFB64646)
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            TiqetControlTheme {
+                TiqetControlApp(SupabaseApi())
+            }
+        }
+    }
+}
+
+@Composable
+private fun TiqetControlTheme(content: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = lightColorScheme(
+            primary = Ink,
+            onPrimary = Color.White,
+            secondary = Teal,
+            onSecondary = Color.White,
+            tertiary = Accent,
+            background = Canvas,
+            surface = CardWhite,
+            onSurface = Ink,
+            onBackground = Ink,
+            outline = Border,
+            error = Danger
+        ),
+        content = content
+    )
+}
+
+@Composable
+private fun TiqetControlApp(api: SupabaseApi) {
+    var session by remember { mutableStateOf<ControlSession?>(null) }
+    if (session == null) {
+        LoginScreen(api = api, onSignedIn = { session = it })
+    } else {
+        ControlWorkspace(
+            api = api,
+            session = session!!,
+            onSignOut = { session = null }
+        )
+    }
+}
+
+@Composable
+private fun LoginScreen(
+    api: SupabaseApi,
+    onSignedIn: (ControlSession) -> Unit
+) {
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Canvas)
+            .systemBarsPadding()
+            .imePadding()
+            .padding(22.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 460.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(CardWhite)
+                .padding(24.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Ink),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("T", color = Color.White, fontWeight = FontWeight.Black, fontSize = 23.sp)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text("TIQET", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                    Text("CONTROL", color = Teal, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.2.sp)
+                }
+            }
+            Spacer(Modifier.height(34.dp))
+            Text("Platform operations", color = Ink, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(7.dp))
+            Text(
+                "Sign in with an account that has been granted Tiqet staff access.",
+                color = Muted, fontSize = 13.sp, lineHeight = 19.sp
+            )
+            Spacer(Modifier.height(25.dp))
+            OutlinedTextField(
+                value = email,
+                onValueChange = { email = it; error = null },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Email address") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                shape = RoundedCornerShape(14.dp)
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it; error = null },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Password") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                shape = RoundedCornerShape(14.dp)
+            )
+            if (error != null) {
+                Spacer(Modifier.height(12.dp))
+                Text(error!!, color = Danger, fontSize = 12.sp, lineHeight = 17.sp)
+            }
+            Spacer(Modifier.height(20.dp))
+            Button(
+                onClick = {
+                    if (!api.isConfigured) {
+                        error = "Supabase configuration is missing from this build."
+                    } else if (email.isBlank() || password.isBlank()) {
+                        error = "Enter your email and password."
+                    } else {
+                        busy = true
+                        error = null
+                        scope.launch {
+                            try {
+                                val newSession = api.signIn(email, password)
+                                // This endpoint is protected by server-side staff-role checks.
+                                api.getOverview(newSession)
+                                onSignedIn(newSession)
+                            } catch (e: Exception) {
+                                error = e.message ?: "Sign-in failed."
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    }
+                },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(15.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Ink)
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(19.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text("Checking access…")
+                } else {
+                    Text("Sign in to Control", fontWeight = FontWeight.SemiBold)
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "Access is granted by the Tiqet super administrator. Customer accounts cannot enter this workspace.",
+                color = Muted, fontSize = 11.sp, lineHeight = 16.sp
+            )
+        }
+    }
+}
+
+private enum class ControlTab(val label: String) {
+    OVERVIEW("Overview"),
+    ORGANISERS("Organisers"),
+    EVENTS("Events"),
+    TEAM("Team"),
+    ACTIVITY("Activity")
+}
+
+@Composable
+private fun ControlWorkspace(
+    api: SupabaseApi,
+    session: ControlSession,
+    onSignOut: () -> Unit
+) {
+    var overview by remember { mutableStateOf(JSONObject()) }
+    var organisers by remember { mutableStateOf(JSONArray()) }
+    var events by remember { mutableStateOf(JSONArray()) }
+    var staff by remember { mutableStateOf(JSONArray()) }
+    var audit by remember { mutableStateOf(JSONArray()) }
+    var selectedTab by remember { mutableStateOf(ControlTab.OVERVIEW) }
+    var busy by remember { mutableStateOf(false) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    val isAdmin = overview.optBoolean("admin_access")
+    val isSuperAdmin = overview.optBoolean("super_admin_access")
+
+    fun refresh() {
+        scope.launch {
+            busy = true
+            error = null
+            try {
+                overview = api.getOverview(session)
+                events = api.getPendingEvents(session)
+                if (overview.optBoolean("admin_access")) {
+                    organisers = api.getOrganisers(session)
+                    audit = api.getAuditLog(session)
+                }
+                if (overview.optBoolean("super_admin_access")) {
+                    staff = api.getStaffDirectory(session)
+                }
+            } catch (e: Exception) {
+                error = e.message ?: "Unable to load Control data."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    LaunchedEffect(session.accessToken) { refresh() }
+
+    val visibleTabs = buildList {
+        add(ControlTab.OVERVIEW)
+        if (isAdmin) add(ControlTab.ORGANISERS)
+        add(ControlTab.EVENTS)
+        if (isSuperAdmin) add(ControlTab.TEAM)
+        if (isAdmin) add(ControlTab.ACTIVITY)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Canvas)
+            .systemBarsPadding()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 18.dp, end = 14.dp, top = 12.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("TIQET", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Black, letterSpacing = 1.8.sp)
+                    Spacer(Modifier.width(8.dp))
+                    Box(Modifier.clip(RoundedCornerShape(6.dp)).background(TealPale).padding(horizontal = 7.dp, vertical = 3.dp)) {
+                        Text("CONTROL", color = Teal, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.1.sp)
+                    }
+                }
+                Text(
+                    if (isSuperAdmin) "Super administrator" else if (isAdmin) "Administrator" else "Moderator workspace",
+                    color = Muted, fontSize = 11.sp
+                )
+            }
+            TextButton(onClick = onSignOut) { Text("Sign out", color = Muted, fontSize = 12.sp) }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(CardWhite)
+                .padding(5.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            visibleTabs.forEach { tab ->
+                val active = selectedTab == tab
+                TextButton(
+                    onClick = { selectedTab = tab },
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 9.dp),
+                    colors = ButtonDefaults.textButtonColors(
+                        containerColor = if (active) Ink else Color.Transparent,
+                        contentColor = if (active) Color.White else Muted
+                    ),
+                    shape = RoundedCornerShape(11.dp)
+                ) {
+                    Text(tab.label, fontSize = 10.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Medium, maxLines = 1)
+                }
+            }
+        }
+
+        if (error != null) {
+            MessageStrip(error!!, isError = true, onDismiss = { error = null })
+        } else if (notice != null) {
+            MessageStrip(notice!!, isError = false, onDismiss = { notice = null })
+        }
+
+        AnimatedContent(
+            targetState = selectedTab,
+            modifier = Modifier.weight(1f),
+            transitionSpec = { fadeIn() togetherWith fadeOut() },
+            label = "control-tab"
+        ) { tab ->
+            when (tab) {
+                ControlTab.OVERVIEW -> OverviewScreen(
+                    overview = overview,
+                    isAdmin = isAdmin,
+                    isSuperAdmin = isSuperAdmin,
+                    isBusy = busy,
+                    onRefresh = { refresh() },
+                    onOpenTab = { selectedTab = it }
+                )
+                ControlTab.ORGANISERS -> OrganiserQueueScreen(
+                    items = organisers,
+                    busy = busy,
+                    onReview = { id, decision, notes ->
+                        scope.launch {
+                            busy = true
+                            try {
+                                api.reviewOrganiser(session, id, decision, notes)
+                                notice = when (decision) {
+                                    "approve" -> "Organiser approved. Their event publishing access is now enabled."
+                                    "reject" -> "Organiser application rejected."
+                                    else -> "Information request recorded."
+                                }
+                                refresh()
+                            } catch (e: Exception) { error = e.message ?: "Could not review organiser." }
+                            finally { busy = false }
+                        }
+                    }
+                )
+                ControlTab.EVENTS -> EventQueueScreen(
+                    items = events,
+                    busy = busy,
+                    onReview = { id, decision, notes ->
+                        scope.launch {
+                            busy = true
+                            try {
+                                api.reviewEvent(session, id, decision, notes)
+                                notice = if (decision == "approve") "Event approved and published." else "Event returned to the organiser for changes."
+                                refresh()
+                            } catch (e: Exception) { error = e.message ?: "Could not review event." }
+                            finally { busy = false }
+                        }
+                    }
+                )
+                ControlTab.TEAM -> TeamScreen(
+                    api = api,
+                    session = session,
+                    staff = staff,
+                    busy = busy,
+                    onChanged = { notice = it; refresh() },
+                    onError = { error = it }
+                )
+                ControlTab.ACTIVITY -> ActivityScreen(entries = audit, busy = busy)
+            }
+        }
+    }
+}
+
+@Composable
+private fun OverviewScreen(
+    overview: JSONObject,
+    isAdmin: Boolean,
+    isSuperAdmin: Boolean,
+    isBusy: Boolean,
+    onRefresh: () -> Unit,
+    onOpenTab: (ControlTab) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(13.dp)
+    ) {
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Good to see you.", color = Muted, fontSize = 12.sp)
+                    Text("Platform at a glance", color = Ink, fontSize = 25.sp, fontWeight = FontWeight.Bold)
+                }
+                TextButton(onClick = onRefresh, enabled = !isBusy) { Text("Refresh", color = Teal) }
+            }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MetricCard("EVENT REVIEWS", overview.optInt("pending_events"), Accent, Modifier.weight(1f))
+                if (isAdmin) MetricCard("ORGANISERS", overview.optInt("pending_organisers"), Teal, Modifier.weight(1f))
+            }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MetricCard("PUBLISHED", overview.optInt("published_events"), Ink, Modifier.weight(1f))
+                if (isAdmin) MetricCard("VERIFIED", overview.optInt("verified_organisers"), Teal, Modifier.weight(1f))
+            }
+        }
+        item {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(19.dp)).background(Ink).padding(18.dp)
+            ) {
+                Text("OPERATIONS", color=Color(0xFFA9C4BC), fontSize=9.sp, fontWeight=FontWeight.Bold, letterSpacing=1.4.sp)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    if (isSuperAdmin) "You have full platform control." else if (isAdmin) "You can verify organisers and manage reviews." else "You can review submitted events.",
+                    color=Color.White, fontSize=17.sp, fontWeight=FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(5.dp))
+                Text("Every approval and staff permission change is recorded in the audit log.", color=Color(0xFFC5D5D0), fontSize=11.sp, lineHeight=16.sp)
+            }
+        }
+        item {
+            Text("WORK QUEUES", color=Muted, fontSize=10.sp, fontWeight=FontWeight.Bold, letterSpacing=1.2.sp)
+        }
+        item {
+            QueueShortcut(
+                title = "Event submissions",
+                subtitle = "${overview.optInt("pending_events")} waiting for review",
+                onClick = { onOpenTab(ControlTab.EVENTS) }
+            )
+        }
+        if (isAdmin) {
+            item {
+                QueueShortcut(
+                    title = "Organiser applications",
+                    subtitle = "${overview.optInt("pending_organisers")} waiting for verification",
+                    onClick = { onOpenTab(ControlTab.ORGANISERS) }
+                )
+            }
+            item {
+                QueueShortcut(
+                    title = "Administrative activity",
+                    subtitle = "Approvals, decisions and staff changes",
+                    onClick = { onOpenTab(ControlTab.ACTIVITY) }
+                )
+            }
+        }
+        if (isSuperAdmin) {
+            item {
+                QueueShortcut(
+                    title = "Staff access",
+                    subtitle = "Manage moderators and administrators",
+                    onClick = { onOpenTab(ControlTab.TEAM) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetricCard(label: String, value: Int, accent: Color, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(CardWhite)
+            .padding(15.dp)
+    ) {
+        Box(Modifier.width(25.dp).height(3.dp).clip(CircleShape).background(accent))
+        Spacer(Modifier.height(12.dp))
+        Text(value.toString(), color=Ink, fontSize=29.sp, fontWeight=FontWeight.Bold)
+        Text(label, color=Muted, fontSize=8.sp, fontWeight=FontWeight.Bold, letterSpacing=1.sp)
+    }
+}
+
+@Composable
+private fun QueueShortcut(title: String, subtitle: String, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        color = CardWhite,
+        shape = RoundedCornerShape(17.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, color=Ink, fontSize=14.sp, fontWeight=FontWeight.SemiBold)
+                Spacer(Modifier.height(3.dp))
+                Text(subtitle, color=Muted, fontSize=11.sp)
+            }
+            Text("→", color=Accent, fontSize=23.sp, fontWeight=FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun OrganiserQueueScreen(
+    items: JSONArray,
+    busy: Boolean,
+    onReview: (String, String, String) -> Unit
+) {
+    var notes by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxSize().padding(horizontal=16.dp)) {
+        ScreenHeading("Organiser applications", "Verify the people and businesses allowed to sell tickets.")
+        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color=Teal)
+        OutlinedTextField(
+            value=notes, onValueChange={notes=it},
+            modifier=Modifier.fillMaxWidth(),
+            label={Text("Reviewer note (optional)")},
+            shape=RoundedCornerShape(13.dp), minLines=1, maxLines=3
+        )
+        Spacer(Modifier.height(10.dp))
+        if (items.length()==0) {
+            EmptyState("No pending organiser applications", "New applications will appear here.")
+        } else {
+            LazyColumn(verticalArrangement=Arrangement.spacedBy(11.dp), contentPadding=PaddingValues(bottom=24.dp)) {
+                items((0 until items.length()).mapNotNull { items.optJSONObject(it) }, key={it.optString("id")}) { org ->
+                    ReviewCard(
+                        title=org.optString("name","Organiser"),
+                        subtitle=org.optString("legal_name"),
+                        meta=listOf(org.optString("contact_phone"),org.optString("created_at").take(10)).filter{it.isNotBlank()}.joinToString(" · "),
+                        note=org.optString("verification_notes"),
+                        busy=busy,
+                        actions=listOf(
+                            ReviewAction("Request info","request_info",Muted),
+                            ReviewAction("Reject","reject",Danger),
+                            ReviewAction("Approve","approve",Teal)
+                        ),
+                        onAction={ decision -> onReview(org.optString("id"),decision,notes.trim()) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EventQueueScreen(
+    items: JSONArray,
+    busy: Boolean,
+    onReview: (String, String, String) -> Unit
+) {
+    var notes by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxSize().padding(horizontal=16.dp)) {
+        ScreenHeading("Event submissions", "Check the listing before it becomes visible to customers.")
+        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color=Teal)
+        OutlinedTextField(
+            value=notes, onValueChange={notes=it},
+            modifier=Modifier.fillMaxWidth(),
+            label={Text("Review note (optional)")},
+            shape=RoundedCornerShape(13.dp), minLines=1, maxLines=3
+        )
+        Spacer(Modifier.height(10.dp))
+        if (items.length()==0) {
+            EmptyState("No pending events", "New submissions from verified organisers will appear here.")
+        } else {
+            LazyColumn(verticalArrangement=Arrangement.spacedBy(11.dp), contentPadding=PaddingValues(bottom=24.dp)) {
+                items((0 until items.length()).mapNotNull { items.optJSONObject(it) }, key={it.optString("id")}) { event ->
+                    ReviewCard(
+                        title=event.optString("title","Untitled event"),
+                        subtitle=event.optString("category"),
+                        meta=listOf(event.optString("starts_at").replace("T"," ").take(16),event.optString("venue_name"),event.optString("city")).filter{it.isNotBlank()}.joinToString(" · "),
+                        note=event.optString("description"),
+                        busy=busy,
+                        actions=listOf(
+                            ReviewAction("Request changes","request_changes",Muted),
+                            ReviewAction("Reject","reject",Danger),
+                            ReviewAction("Approve & publish","approve",Teal)
+                        ),
+                        onAction={ decision -> onReview(event.optString("id"),decision,notes.trim()) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+private data class ReviewAction(val label: String, val decision: String, val color: Color)
+
+@Composable
+private fun ReviewCard(
+    title: String,
+    subtitle: String,
+    meta: String,
+    note: String,
+    busy: Boolean,
+    actions: List<ReviewAction>,
+    onAction: (String) -> Unit
+) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(CardWhite).padding(15.dp).animateContentSize()
+    ) {
+        Text(title, color=Ink, fontSize=15.sp, fontWeight=FontWeight.Bold)
+        if (subtitle.isNotBlank()) {
+            Spacer(Modifier.height(3.dp))
+            Text(subtitle, color=Teal, fontSize=11.sp, fontWeight=FontWeight.SemiBold)
+        }
+        if (meta.isNotBlank()) {
+            Spacer(Modifier.height(7.dp))
+            Text(meta, color=Muted, fontSize=10.sp, lineHeight=15.sp)
+        }
+        if (note.isNotBlank()) {
+            Spacer(Modifier.height(9.dp))
+            Text(note, color=Ink, fontSize=12.sp, lineHeight=17.sp, maxLines=5, overflow=TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.height(13.dp))
+        FlowRowCompat(actions, busy, onAction)
+    }
+}
+
+@Composable
+private fun FlowRowCompat(actions: List<ReviewAction>, busy: Boolean, onAction: (String) -> Unit) {
+    Column(verticalArrangement=Arrangement.spacedBy(7.dp)) {
+        actions.chunked(2).forEach { row ->
+            Row(horizontalArrangement=Arrangement.spacedBy(7.dp)) {
+                row.forEach { action ->
+                    OutlinedButton(
+                        onClick={onAction(action.decision)},
+                        enabled=!busy,
+                        modifier=Modifier.weight(1f),
+                        shape=RoundedCornerShape(12.dp),
+                        colors=ButtonDefaults.outlinedButtonColors(contentColor=action.color),
+                        contentPadding=PaddingValues(horizontal=7.dp,vertical=9.dp)
+                    ) {
+                        Text(action.label,fontSize=10.sp,fontWeight=FontWeight.SemiBold,maxLines=1)
+                    }
+                }
+                if (row.size==1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun TeamScreen(
+    api: SupabaseApi,
+    session: ControlSession,
+    staff: JSONArray,
+    busy: Boolean,
+    onChanged: (String) -> Unit,
+    onError: (String) -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf(JSONArray()) }
+    var note by remember { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
+    val scope=rememberCoroutineScope()
+
+    Column(Modifier.fillMaxSize().padding(horizontal=16.dp)) {
+        ScreenHeading("Staff access", "Only the super administrator can change staff permissions.")
+        OutlinedTextField(
+            value=query,onValueChange={query=it},
+            modifier=Modifier.fillMaxWidth(),label={Text("Search a user by email")},
+            singleLine=true,shape=RoundedCornerShape(13.dp)
+        )
+        OutlinedTextField(
+            value=note,onValueChange={note=it},
+            modifier=Modifier.fillMaxWidth(),label={Text("Reason for access change")},
+            singleLine=true,shape=RoundedCornerShape(13.dp)
+        )
+        Button(
+            onClick={
+                scope.launch {
+                    searching=true
+                    try { results=api.searchUsers(session,query.trim()) }
+                    catch(e:Exception){ onError(e.message ?: "Search failed.") }
+                    finally { searching=false }
+                }
+            },
+            enabled=!searching && query.trim().length>=3,
+            modifier=Modifier.fillMaxWidth().height(46.dp),
+            colors=ButtonDefaults.buttonColors(containerColor=Ink),
+            shape=RoundedCornerShape(12.dp)
+        ) {
+            Text(if(searching) "Searching…" else "Search users")
+        }
+        Spacer(Modifier.height(13.dp))
+        if(results.length()>0) {
+            Text("MATCHING ACCOUNTS",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
+            Spacer(Modifier.height(6.dp))
+            LazyColumn(Modifier.heightIn(max=240.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                items((0 until results.length()).mapNotNull{results.optJSONObject(it)},key={it.optString("user_id")}) { user ->
+                    Column(Modifier.fillMaxWidth().background(CardWhite,RoundedCornerShape(14.dp)).padding(12.dp)) {
+                        Text(user.optString("email"),color=Ink,fontSize=12.sp,fontWeight=FontWeight.SemiBold)
+                        Text(user.optString("full_name"),color=Muted,fontSize=10.sp)
+                        Text("Current role: ${user.optString("staff_role","none")}",color=Teal,fontSize=10.sp)
+                        Spacer(Modifier.height(7.dp))
+                        Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                            listOf("moderator","admin","super_admin").forEach { role ->
+                                TextButton(onClick={
+                                    scope.launch {
+                                        try {
+                                            api.assignStaffRole(session,user.optString("user_id"),role,note.trim())
+                                            onChanged("Assigned $role access to ${user.optString("email")}.")
+                                            results=api.searchUsers(session,query.trim())
+                                        } catch(e:Exception){ onError(e.message ?: "Could not assign role.") }
+                                    }
+                                }) { Text(role.replace('_',' '),fontSize=9.sp,color=Teal) }
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+        Text("CURRENT STAFF",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
+        Spacer(Modifier.height(7.dp))
+        if(staff.length()==0) EmptyState("No staff accounts", "Assign the first moderator or administrator.")
+        else LazyColumn(verticalArrangement=Arrangement.spacedBy(8.dp),contentPadding=PaddingValues(bottom=24.dp)) {
+            items((0 until staff.length()).mapNotNull{staff.optJSONObject(it)},key={it.optString("user_id")}) { member ->
+                Row(
+                    Modifier.fillMaxWidth().background(CardWhite,RoundedCornerShape(14.dp)).padding(12.dp),
+                    verticalAlignment=Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(member.optString("email"),color=Ink,fontSize=12.sp,fontWeight=FontWeight.SemiBold)
+                        Text(member.optString("role").replace('_',' '),color=Teal,fontSize=10.sp)
+                    }
+                    TextButton(onClick={
+                        scope.launch {
+                            try {
+                                api.revokeStaffRole(session,member.optString("user_id"),note.trim())
+                                onChanged("Staff access revoked.")
+                            } catch(e:Exception){ onError(e.message ?: "Could not revoke role.") }
+                        }
+                    }) { Text("Revoke",color=Danger,fontSize=10.sp) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityScreen(entries: JSONArray, busy: Boolean) {
+    Column(Modifier.fillMaxSize().padding(horizontal=16.dp)) {
+        ScreenHeading("Activity log", "A record of reviews and administrative access changes.")
+        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(),color=Teal)
+        if (entries.length()==0) EmptyState("No activity yet","Important administrative actions will appear here.")
+        else LazyColumn(verticalArrangement=Arrangement.spacedBy(9.dp),contentPadding=PaddingValues(bottom=24.dp)) {
+            items((0 until entries.length()).mapNotNull{entries.optJSONObject(it)},key={it.optString("id")}) { entry ->
+                Column(Modifier.fillMaxWidth().background(CardWhite,RoundedCornerShape(14.dp)).padding(13.dp)) {
+                    Text(entry.optString("action").replace('_',' '),color=Ink,fontSize=12.sp,fontWeight=FontWeight.Bold)
+                    Text(entry.optString("actor_email"),color=Teal,fontSize=10.sp)
+                    if(entry.optString("reason").isNotBlank()) Text(entry.optString("reason"),color=Muted,fontSize=11.sp)
+                    Text(entry.optString("created_at").replace("T"," ").take(16),color=Muted,fontSize=9.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScreenHeading(title: String, subtitle: String) {
+    Column(Modifier.padding(top=16.dp,bottom=12.dp)) {
+        Text(title,color=Ink,fontSize=22.sp,fontWeight=FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Text(subtitle,color=Muted,fontSize=11.sp,lineHeight=16.sp)
+    }
+}
+
+@Composable
+private fun EmptyState(title: String, subtitle: String) {
+    Column(
+        Modifier.fillMaxWidth().padding(vertical=36.dp),
+        horizontalAlignment=Alignment.CenterHorizontally
+    ) {
+        Box(Modifier.size(42.dp).clip(CircleShape).background(TealPale),contentAlignment=Alignment.Center) {
+            Text("✓",color=Teal,fontWeight=FontWeight.Bold,fontSize=18.sp)
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(title,color=Ink,fontWeight=FontWeight.SemiBold,fontSize=13.sp)
+        Spacer(Modifier.height(3.dp))
+        Text(subtitle,color=Muted,fontSize=10.sp)
+    }
+}
+
+@Composable
+private fun MessageStrip(message: String, isError: Boolean, onDismiss: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal=16.dp, vertical=5.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if(isError) AccentPale else TealPale)
+            .padding(horizontal=12.dp,vertical=9.dp),
+        verticalAlignment=Alignment.CenterVertically
+    ) {
+        Text(message,color=if(isError) Danger else Teal,fontSize=11.sp,modifier=Modifier.weight(1f))
+        TextButton(onClick=onDismiss,contentPadding=PaddingValues(4.dp)) {
+            Text("×",color=if(isError) Danger else Teal,fontSize=17.sp)
+        }
+    }
+}
