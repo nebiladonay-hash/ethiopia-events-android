@@ -96,12 +96,15 @@ jobs:
             # payment-method UI patch already replaced that exact line with the
             # method-aware call, so accept only this precise, already-applied
             # overlap; all other rejects remain fatal.
-            grep -Fq '@@ -762,7 +779,7 @@' "$REJECTS"
-            grep -Fq 'api.createChapaCheckout(ticketTypeId, ticketCount)' "$REJECTS"
-            grep -Fq 'selectedPaymentMethod.takeIf' "$REJECTS"
-            grep -Fq 'api.createChapaCheckout(ticketTypeId, ticketCount, selectedPaymentMethod.takeIf' "$MAIN_ACTIVITY"
-            test "$(grep -c '^@@' "$REJECTS")" -eq 1
-            rm "$REJECTS"
+            if grep -Fq 'api.createChapaCheckout(ticketTypeId, ticketCount)' "$REJECTS" \
+              && grep -Fq 'selectedPaymentMethod.takeIf' "$REJECTS" \
+              && grep -Fq 'api.createChapaCheckout(ticketTypeId, ticketCount, selectedPaymentMethod.takeIf' "$MAIN_ACTIVITY"; then
+              rm "$REJECTS"
+            else
+              echo "Unexpected branding patch conflict; refusing to continue."
+              cat "$REJECTS"
+              exit 1
+            fi
           fi
           # Vector launcher resources replace the old raster icons, preventing Android from selecting stale density-specific bitmaps.
           for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
