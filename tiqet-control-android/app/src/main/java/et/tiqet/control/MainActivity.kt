@@ -1315,7 +1315,7 @@ private fun FinanceScreen(
                             enabled = !busy,
                             contentPadding = PaddingValues(horizontal=4.dp,vertical=3.dp)
                         ) { Text("Verify with Chapa",color=Teal,fontSize=11.sp) }
-                    } else if (row.optString("status") == "requested" &&
+                    } else if (row.optString("status") in listOf("requested", "submission_unknown") &&
                         row.optString("provider_reference").isBlank() &&
                         row.optString("idempotency_key").isNotBlank()) {
                         TextButton(
