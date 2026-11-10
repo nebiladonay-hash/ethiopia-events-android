@@ -1,0 +1,54 @@
+name: Validate TIQET refund migration on PostgreSQL
+
+on:
+  push:
+    branches:
+      - tiqet-refund-backend-v1
+    paths:
+      - 'supabase/migrations/**'
+      - 'supabase/tests/**'
+      - '.github/workflows/test-tiqet-refund-migration.yml'
+  pull_request:
+    paths:
+      - 'supabase/migrations/**'
+      - 'supabase/tests/**'
+      - '.github/workflows/test-tiqet-refund-migration.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-migration:
+    name: PostgreSQL 17 migration and lifecycle tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tiqet_refund_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tiqet_refund_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: tiqet_refund_test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Create disposable Supabase-compatible schema
+        run: psql -v ON_ERROR_STOP=1 -f supabase/tests/chapa_refund_bootstrap.sql
+
+      - name: Apply refund migration to disposable PostgreSQL
+        run: psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261110120000_chapa_refund_operations.sql
+
+      - name: Exercise refund lifecycle and access controls
+        run: psql -v ON_ERROR_STOP=1 -f supabase/tests/chapa_refund_operations.test.sql
