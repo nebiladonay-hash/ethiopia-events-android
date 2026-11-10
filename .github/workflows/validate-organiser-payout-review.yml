@@ -26,3 +26,5 @@ jobs:
           deno-version: v2.x
       - name: Type-check organiser payout endpoint
         run: deno check supabase/functions/tiqet-admin-organiser-payout/index.ts
+      - name: Test organiser payout state transitions
+        run: deno test supabase/functions/tiqet-admin-organiser-payout/policy.test.ts
