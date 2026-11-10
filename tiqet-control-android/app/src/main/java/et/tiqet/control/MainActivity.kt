@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -236,6 +238,8 @@ private fun ControlWorkspace(
     var staff by remember { mutableStateOf(JSONArray()) }
     var audit by remember { mutableStateOf(JSONArray()) }
     var finance by remember { mutableStateOf(JSONObject()) }
+    var refundsDashboard by remember { mutableStateOf(JSONObject()) }
+    var payoutDestinations by remember { mutableStateOf(JSONArray()) }
     var selectedTab by remember { mutableStateOf(ControlTab.OVERVIEW) }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -258,6 +262,7 @@ private fun ControlWorkspace(
                     verifiedOrganisers = api.getVerifiedOrganisers(session)
                     audit = api.getAuditLog(session)
                     finance = api.getFinanceDashboard(session)
+                    refundsDashboard = api.getRefundsDashboard(session)
                 }
                 if (overview.optBoolean("super_admin_access")) {
                     staff = api.getStaffDirectory(session)
@@ -424,7 +429,106 @@ private fun ControlWorkspace(
                     onError = { error = it }
                 )
                 ControlTab.ACTIVITY -> ActivityScreen(entries = audit, busy = busy)
-                ControlTab.FINANCE -> FinanceScreen(finance = finance, busy = busy)
+                ControlTab.FINANCE -> FinanceScreen(
+                    finance = finance,
+                    refundsDashboard = refundsDashboard,
+                    busy = busy,
+                    isPlatformOwner = session.isPlatformOwner,
+                    payoutDestinations = payoutDestinations,
+                    onLoadPayoutDestinations = {
+                        scope.launch {
+                            try {
+                                payoutDestinations = api.getChapaPayoutDestinations(session)
+                            } catch (e: Exception) {
+                                error = e.message ?: "Could not load Chapa payout destinations."
+                            }
+                        }
+                    },
+                    onCreatePlatformPayout = { amountMinor, bankSlug, bankName, accountName, accountNumber ->
+                        scope.launch {
+                            busy = true
+                            error = null
+                            try {
+                                val result = api.createPlatformPayout(
+                                    session, amountMinor, bankSlug, bankName, accountName, accountNumber
+                                )
+                                notice = "Platform withdrawal recorded with Chapa status ${result.optString("status", "pending")}. It remains under reconciliation until final confirmation."
+                                finance = api.getFinanceDashboard(session)
+                            } catch (e: Exception) {
+                                error = e.message ?: "Could not submit the platform withdrawal."
+                                try { finance = api.getFinanceDashboard(session) } catch (_: Exception) { }
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    },
+                    onResolveOrganiserPayout = { requestId, status, providerReference, operatorNote ->
+                        scope.launch {
+                            busy = true
+                            error = null
+                            try {
+                                val result = api.resolveOrganiserPayout(
+                                    session, requestId, status, providerReference, operatorNote
+                                )
+                                notice = "Organiser payout request updated to ${result.optString("status", status)}. Settlement ledger and audit records were updated."
+                                finance = api.getFinanceDashboard(session)
+                                audit = api.getAuditLog(session)
+                            } catch (e: Exception) {
+                                error = e.message ?: "Could not update organiser payout request."
+                                try {
+                                    finance = api.getFinanceDashboard(session)
+                                    audit = api.getAuditLog(session)
+                                } catch (_: Exception) { }
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    },
+                    onRequestRefund = { paymentId, amountMinor, reason, idempotencyKey ->
+                        scope.launch {
+                            busy = true
+                            error = null
+                            try {
+                                val result = api.createChapaRefund(session, paymentId, amountMinor, reason, idempotencyKey)
+                                notice = "Chapa refund request recorded: ${result.optString("status", "pending")}. Verify the individual refund before closing the finance review."
+                                finance = api.getFinanceDashboard(session)
+                                refundsDashboard = api.getRefundsDashboard(session)
+                            } catch (e: Exception) {
+                                error = e.message ?: "Could not create the Chapa refund request."
+                                // A timeout can still leave a saved submission_unknown operation.
+                                // Refresh so the operator can safely retry the same idempotency key.
+                                try {
+                                    finance = api.getFinanceDashboard(session)
+                                    refundsDashboard = api.getRefundsDashboard(session)
+                                } catch (_: Exception) { }
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    },
+                    onRefresh = { refresh() },
+                    onVerifyRefund = { refundId ->
+                        scope.launch {
+                            busy = true
+                            error = null
+                            try {
+                                val result = api.verifyChapaRefund(session, refundId)
+                                notice = "Chapa refund verification: ${result.optString("status", "unknown")}. Ticket and settlement reconciliation remains in the finance review queue."
+                                finance = api.getFinanceDashboard(session)
+                                refundsDashboard = api.getRefundsDashboard(session)
+                            } catch (e: Exception) {
+                                error = e.message ?: "Could not verify the Chapa refund."
+                                // Keep pending/unknown verification states visible after provider outages.
+                                try {
+                                    finance = api.getFinanceDashboard(session)
+                                    refundsDashboard = api.getRefundsDashboard(session)
+                                } catch (_: Exception) { }
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    }
+                )
                 ControlTab.USERS -> UserModerationScreen(
                     api = api,
                     session = session,
@@ -1154,11 +1258,44 @@ private fun UserModerationScreen(
 }
 
 @Composable
-private fun FinanceScreen(finance: JSONObject, busy: Boolean) {
+private fun FinanceScreen(
+    finance: JSONObject,
+    refundsDashboard: JSONObject,
+    busy: Boolean,
+    isPlatformOwner: Boolean,
+    payoutDestinations: JSONArray,
+    onLoadPayoutDestinations: () -> Unit,
+    onCreatePlatformPayout: (amountMinor: Long, bankSlug: String, bankName: String, accountName: String, accountNumber: String) -> Unit,
+    onResolveOrganiserPayout: (requestId: String, status: String, providerReference: String, operatorNote: String) -> Unit,
+    onRequestRefund: (paymentId: String, amountMinor: Long?, reason: String, idempotencyKey: String) -> Unit,
+    onVerifyRefund: (refundId: String) -> Unit,
+    onRefresh: () -> Unit
+) {
     val summary = finance.optJSONObject("summary") ?: JSONObject()
     val payments = finance.optJSONArray("recent_payments") ?: JSONArray()
     val refunds = finance.optJSONArray("refund_alerts") ?: JSONArray()
+    val individualRefunds = refundsDashboard.optJSONArray("refunds") ?: JSONArray()
+    val refundSummary = refundsDashboard.optJSONObject("summary") ?: JSONObject()
     val platformPayouts = finance.optJSONArray("platform_payouts") ?: JSONArray()
+    var selectedPayment by remember { mutableStateOf<JSONObject?>(null) }
+    var amountEtb by remember { mutableStateOf("") }
+    var reason by remember { mutableStateOf("") }
+    var idempotencyKey by remember { mutableStateOf("") }
+    var formError by remember { mutableStateOf<String?>(null) }
+    var showPayoutDialog by remember { mutableStateOf(false) }
+    var payoutAmountEtb by remember { mutableStateOf("") }
+    var payoutAccountName by remember { mutableStateOf("") }
+    var payoutAccountNumber by remember { mutableStateOf("") }
+    var selectedDestinationSlug by remember { mutableStateOf("") }
+    var payoutMenuExpanded by remember { mutableStateOf(false) }
+    var payoutFormError by remember { mutableStateOf<String?>(null) }
+    var selectedOrganiserPayout by remember { mutableStateOf<JSONObject?>(null) }
+    var organiserPayoutNextStatus by remember { mutableStateOf("") }
+    var organiserPayoutProviderReference by remember { mutableStateOf("") }
+    var organiserPayoutNote by remember { mutableStateOf("") }
+    var organiserPayoutFormError by remember { mutableStateOf<String?>(null) }
+    val destinations = (0 until payoutDestinations.length()).mapNotNull { payoutDestinations.optJSONObject(it) }
+    val selectedDestination = destinations.firstOrNull { it.optString("slug") == selectedDestinationSlug }
     val organiserPayouts = finance.optJSONArray("organiser_payout_requests") ?: JSONArray()
 
     fun money(value: Double): String = "ETB " + String.format(Locale.US, "%,.2f", value)
@@ -1172,8 +1309,11 @@ private fun FinanceScreen(finance: JSONObject, busy: Boolean) {
     ) {
         item {
             Column {
-                Text("Financial monitoring",color=Ink,fontSize=23.sp,fontWeight=FontWeight.Bold)
-                Text("Read-only overview of verified payments, refunds and payout queues.",color=Muted,fontSize=11.sp,lineHeight=16.sp)
+                Row(verticalAlignment=Alignment.CenterVertically) {
+                    Text("Financial operations",color=Ink,fontSize=23.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
+                    TextButton(onClick=onRefresh,enabled=!busy) { Text("Refresh",color=Teal,fontSize=11.sp) }
+                }
+                Text("Verified payments, refund requests and settlement review.",color=Muted,fontSize=11.sp,lineHeight=16.sp)
                 if (busy) {
                     Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(Modifier.fillMaxWidth(),color=Teal)
@@ -1190,6 +1330,12 @@ private fun FinanceScreen(finance: JSONObject, busy: Boolean) {
             Row(horizontalArrangement=Arrangement.spacedBy(9.dp)) {
                 FinanceMetric("PAYMENT REVIEW",summary.optInt("payment_reviews").toString(),Accent,Modifier.weight(1f))
                 FinanceMetric("REFUNDS TO REVIEW",summary.optInt("refunds_needing_review").toString(),Danger,Modifier.weight(1f))
+            }
+        }
+        item {
+            Row(horizontalArrangement=Arrangement.spacedBy(9.dp)) {
+                FinanceMetric("OPEN REFUND REQUESTS",refundSummary.optInt("open").toString(),Accent,Modifier.weight(1f))
+                FinanceMetric("VERIFIED REFUNDS",refundSummary.optInt("succeeded").toString(),Teal,Modifier.weight(1f))
             }
         }
         item {
@@ -1212,6 +1358,70 @@ private fun FinanceScreen(finance: JSONObject, busy: Boolean) {
                     Text("Order: ${row.optString("order_status")} · ${row.optString("buyer_email")}",color=Muted,fontSize=10.sp)
                     Text(row.optString("merchant_reference"),color=Muted,fontSize=9.sp)
                     Text(row.optString("created_at").replace("T"," ").take(16),color=Muted,fontSize=9.sp)
+                    if (row.optString("provider") == "chapa" &&
+                        row.optString("status") in listOf("succeeded","partially_refunded")) {
+                        Spacer(Modifier.height(5.dp))
+                        OutlinedButton(
+                            onClick = {
+                                selectedPayment = row
+                                amountEtb = ""
+                                reason = ""
+                                formError = null
+                                idempotencyKey = java.util.UUID.randomUUID().toString()
+                            },
+                            enabled = !busy,
+                            shape = RoundedCornerShape(11.dp),
+                            contentPadding = PaddingValues(horizontal=12.dp,vertical=7.dp)
+                        ) {
+                            Text("Request refund",fontSize=11.sp)
+                        }
+                    }
+                }
+            }
+        }
+        item { FinanceSectionTitle("Individual refund requests",individualRefunds.length()) }
+        if (individualRefunds.length() == 0) {
+            item { Text("No individual refund requests recorded.",color=Muted,fontSize=11.sp) }
+        } else {
+            items((0 until individualRefunds.length()).mapNotNull{individualRefunds.optJSONObject(it)},key={it.optString("id")}) { row ->
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(CardWhite).padding(13.dp)) {
+                    Row(verticalAlignment=Alignment.CenterVertically) {
+                        Text(amount(row),color=Ink,fontSize=15.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
+                        StatusPill(row.optString("status"))
+                    }
+                    Text(row.optString("reason"),color=Muted,fontSize=10.sp)
+                    Text("Payment: ${row.optString("payment_merchant_reference")}",color=Muted,fontSize=9.sp)
+                    Text("Refund ref: ${row.optString("provider_reference").ifBlank { row.optString("merchant_reference") }}",color=Muted,fontSize=9.sp)
+                    if (row.optString("status") in listOf("requested","pending","submission_unknown") &&
+                        row.optString("provider_reference").isNotBlank()) {
+                        TextButton(
+                            onClick = { onVerifyRefund(row.optString("id")) },
+                            enabled = !busy,
+                            contentPadding = PaddingValues(horizontal=4.dp,vertical=3.dp)
+                        ) { Text("Verify with Chapa",color=Teal,fontSize=11.sp) }
+                    } else if (row.optString("status") in listOf("requested", "submission_unknown") &&
+                        row.optString("provider_reference").isBlank() &&
+                        row.optString("idempotency_key").isNotBlank()) {
+                        TextButton(
+                            onClick = {
+                                val fullRefund = row.optBoolean("request_full_refund")
+                                val partialAmount = if (fullRefund || row.isNull("requested_amount_minor")) null
+                                    else row.optLong("requested_amount_minor")
+                                onRequestRefund(
+                                    row.optString("payment_id"),
+                                    partialAmount,
+                                    row.optString("reason"),
+                                    row.optString("idempotency_key")
+                                )
+                            },
+                            enabled = !busy,
+                            contentPadding = PaddingValues(horizontal=4.dp,vertical=3.dp)
+                        ) { Text("Retry same request",color=Teal,fontSize=11.sp) }
+                    }
+                    if (row.optString("error_message").isNotBlank()) {
+                        Text(row.optString("error_message"),color=Danger,fontSize=10.sp)
+                    }
+                    Text(row.optString("created_at").replace("T"," ").take(16),color=Muted,fontSize=9.sp)
                 }
             }
         }
@@ -1231,7 +1441,37 @@ private fun FinanceScreen(finance: JSONObject, busy: Boolean) {
                 }
             }
         }
-        item { FinanceSectionTitle("Platform withdrawals",platformPayouts.length()) }
+        item {
+            Row(verticalAlignment=Alignment.CenterVertically) {
+                Text("Platform withdrawals",color=Ink,fontSize=13.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
+                Text(platformPayouts.length().toString(),color=Muted,fontSize=10.sp)
+                if (isPlatformOwner) {
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            payoutAmountEtb = ""
+                            payoutAccountName = ""
+                            payoutAccountNumber = ""
+                            selectedDestinationSlug = ""
+                            payoutFormError = null
+                            showPayoutDialog = true
+                            onLoadPayoutDestinations()
+                        },
+                        enabled = !busy,
+                        contentPadding = PaddingValues(horizontal=10.dp, vertical=6.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor=Ink)
+                    ) { Text("Withdraw",fontSize=10.sp) }
+                }
+            }
+        }
+        if (isPlatformOwner) {
+            item {
+                Text(
+                    "Withdrawals are restricted to the platform owner. Chapa verifies the destination and available balance before a request is reserved.",
+                    color=Muted,fontSize=10.sp,lineHeight=15.sp
+                )
+            }
+        }
         if(platformPayouts.length()==0) {
             item { Text("No platform withdrawals recorded.",color=Muted,fontSize=11.sp) }
         } else {
@@ -1249,20 +1489,391 @@ private fun FinanceScreen(finance: JSONObject, busy: Boolean) {
             item { Text("No organiser payout requests recorded.",color=Muted,fontSize=11.sp) }
         } else {
             items((0 until organiserPayouts.length()).mapNotNull{organiserPayouts.optJSONObject(it)},key={it.optString("id")}) { row ->
-                FinanceRecord(
-                    title=amount(row),
-                    subtitle="${row.optString("organisation_name")} · ${row.optString("provider")}",
-                    reference=row.optString("provider_reference"),
-                    status=row.optString("status")
-                )
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(CardWhite).padding(13.dp),
+                    verticalArrangement=Arrangement.spacedBy(5.dp)
+                ) {
+                    Row(verticalAlignment=Alignment.CenterVertically) {
+                        Text(amount(row),color=Ink,fontSize=15.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
+                        StatusPill(row.optString("status"))
+                    }
+                    Text("${row.optString("organisation_name")} · ${row.optString("provider")}",color=Muted,fontSize=10.sp)
+                    if (row.optString("provider_reference").isNotBlank()) {
+                        Text("Provider ref: ${row.optString("provider_reference")}",color=Muted,fontSize=9.sp)
+                    }
+                    Text(row.optString("operator_note"),color=Muted,fontSize=10.sp)
+                    val current = row.optString("status")
+                    Row(horizontalArrangement=Arrangement.spacedBy(5.dp)) {
+                        when (current) {
+                            "requested" -> {
+                                TextButton(
+                                    onClick = {
+                                        selectedOrganiserPayout=row
+                                        organiserPayoutNextStatus="approved"
+                                        organiserPayoutProviderReference=""
+                                        organiserPayoutNote=""
+                                        organiserPayoutFormError=null
+                                    },
+                                    enabled=!busy
+                                ) { Text("Approve",color=Teal,fontSize=10.sp) }
+                                TextButton(
+                                    onClick = {
+                                        selectedOrganiserPayout=row
+                                        organiserPayoutNextStatus="rejected"
+                                        organiserPayoutProviderReference=""
+                                        organiserPayoutNote=""
+                                        organiserPayoutFormError=null
+                                    },
+                                    enabled=!busy
+                                ) { Text("Reject",color=Danger,fontSize=10.sp) }
+                            }
+                            "approved" -> {
+                                TextButton(
+                                    onClick = {
+                                        selectedOrganiserPayout=row
+                                        organiserPayoutNextStatus="processing"
+                                        organiserPayoutProviderReference=""
+                                        organiserPayoutNote=""
+                                        organiserPayoutFormError=null
+                                    },
+                                    enabled=!busy
+                                ) { Text("Start processing",color=Teal,fontSize=10.sp) }
+                                TextButton(
+                                    onClick = {
+                                        selectedOrganiserPayout=row
+                                        organiserPayoutNextStatus="rejected"
+                                        organiserPayoutProviderReference=""
+                                        organiserPayoutNote=""
+                                        organiserPayoutFormError=null
+                                    },
+                                    enabled=!busy
+                                ) { Text("Reject",color=Danger,fontSize=10.sp) }
+                            }
+                            "processing" -> {
+                                TextButton(
+                                    onClick = {
+                                        selectedOrganiserPayout=row
+                                        organiserPayoutNextStatus="paid"
+                                        organiserPayoutProviderReference=""
+                                        organiserPayoutNote=""
+                                        organiserPayoutFormError=null
+                                    },
+                                    enabled=!busy
+                                ) { Text("Confirm paid",color=Teal,fontSize=10.sp) }
+                                TextButton(
+                                    onClick = {
+                                        selectedOrganiserPayout=row
+                                        organiserPayoutNextStatus="failed"
+                                        organiserPayoutProviderReference=""
+                                        organiserPayoutNote=""
+                                        organiserPayoutFormError=null
+                                    },
+                                    enabled=!busy
+                                ) { Text("Mark failed",color=Danger,fontSize=10.sp) }
+                            }
+                            "paid" -> TextButton(
+                                onClick = {
+                                    selectedOrganiserPayout=row
+                                    organiserPayoutNextStatus="reversed"
+                                    organiserPayoutProviderReference=""
+                                    organiserPayoutNote=""
+                                    organiserPayoutFormError=null
+                                },
+                                enabled=!busy
+                            ) { Text("Record reversal",color=Danger,fontSize=10.sp) }
+                        }
+                    }
+                }
             }
         }
         item {
             Text(
-                "Read-only monitoring. This screen does not initiate refunds, approve withdrawals or move money.",
+                "Verified refunds remain in finance review until ticket entitlement and organiser/platform settlement are reconciled. This screen does not issue automatic organiser payouts.",
                 color=Muted,fontSize=10.sp,lineHeight=15.sp
             )
         }
+    }
+
+    if (showPayoutDialog) {
+        val parsedPayoutAmount = if (payoutAmountEtb.isBlank()) null else runCatching {
+            java.math.BigDecimal(payoutAmountEtb.trim())
+                .movePointRight(2)
+                .setScale(0, java.math.RoundingMode.UNNECESSARY)
+                .longValueExact()
+        }.getOrNull()
+        AlertDialog(
+            onDismissRequest = {
+                if (!busy) {
+                    showPayoutDialog = false
+                    payoutAccountNumber = ""
+                }
+            },
+            title = { Text("Withdraw platform revenue",color=Ink,fontWeight=FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier.heightIn(max=480.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(9.dp)
+                ) {
+                    Text(
+                        "Request a Chapa transfer from TIQET's platform balance to a verified bank or wallet account. The server checks available funds and retains the request for reconciliation.",
+                        color=Muted,fontSize=10.sp,lineHeight=15.sp
+                    )
+                    OutlinedTextField(
+                        value=payoutAmountEtb,
+                        onValueChange={payoutAmountEtb=it;payoutFormError=null},
+                        modifier=Modifier.fillMaxWidth(),
+                        label={Text("Amount in ETB")},
+                        placeholder={Text("Minimum 1.00")},
+                        singleLine=true,
+                        keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal)
+                    )
+                    Box(Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick={ payoutMenuExpanded = true },
+                            modifier=Modifier.fillMaxWidth(),
+                            enabled=destinations.isNotEmpty()
+                        ) {
+                            Text(selectedDestination?.optString("name") ?: if(destinations.isEmpty()) "Loading payout destinations…" else "Choose bank or wallet")
+                        }
+                        DropdownMenu(
+                            expanded=payoutMenuExpanded,
+                            onDismissRequest={payoutMenuExpanded=false},
+                            modifier=Modifier.heightIn(max=260.dp)
+                        ) {
+                            destinations.forEach { destination ->
+                                DropdownMenuItem(
+                                    text={Text(destination.optString("name") + " · " + destination.optString("type","bank"))},
+                                    onClick={
+                                        selectedDestinationSlug=destination.optString("slug")
+                                        payoutMenuExpanded=false
+                                        payoutFormError=null
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value=payoutAccountName,
+                        onValueChange={payoutAccountName=it;payoutFormError=null},
+                        modifier=Modifier.fillMaxWidth(),
+                        label={Text("Account holder name")},
+                        singleLine=true
+                    )
+                    OutlinedTextField(
+                        value=payoutAccountNumber,
+                        onValueChange={payoutAccountNumber=it.filter(Char::isDigit);payoutFormError=null},
+                        modifier=Modifier.fillMaxWidth(),
+                        label={Text("Bank or wallet account number")},
+                        singleLine=true,
+                        keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number)
+                    )
+                    Text(
+                        "Only the last four digits are stored by TIQET. Do not submit another withdrawal while an earlier request is pending or uncertain.",
+                        color=Muted,fontSize=10.sp,lineHeight=14.sp
+                    )
+                    if (payoutFormError != null) Text(payoutFormError!!,color=Danger,fontSize=10.sp)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cleanName=payoutAccountName.trim()
+                        val cleanNumber=payoutAccountNumber.trim()
+                        when {
+                            parsedPayoutAmount == null || parsedPayoutAmount < 100 ->
+                                payoutFormError="Enter an amount with up to two decimal places (minimum ETB 1.00)."
+                            selectedDestination == null ->
+                                payoutFormError="Choose an active Chapa bank or wallet destination."
+                            cleanName.length < 2 ->
+                                payoutFormError="Enter the account holder name."
+                            !cleanNumber.matches(Regex("^[0-9]{6,30}$")) ->
+                                payoutFormError="Enter a valid account number (6 to 30 digits)."
+                            else -> {
+                                onCreatePlatformPayout(
+                                    parsedPayoutAmount,
+                                    selectedDestinationSlug,
+                                    selectedDestination.optString("name"),
+                                    cleanName,
+                                    cleanNumber
+                                )
+                                showPayoutDialog=false
+                                payoutAccountNumber=""
+                            }
+                        }
+                    },
+                    enabled=!busy,
+                    colors=ButtonDefaults.buttonColors(containerColor=Ink)
+                ) { Text("Submit withdrawal") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick={showPayoutDialog=false;payoutAccountNumber=""},
+                    enabled=!busy
+                ) { Text("Cancel",color=Muted) }
+            },
+            shape=RoundedCornerShape(20.dp),
+            containerColor=CardWhite
+        )
+    }
+
+    if (selectedOrganiserPayout != null) {
+        val payout = selectedOrganiserPayout!!
+        val finalAction = organiserPayoutNextStatus in listOf("paid", "reversed")
+        AlertDialog(
+            onDismissRequest = { if (!busy) selectedOrganiserPayout = null },
+            title = {
+                Text(
+                    when (organiserPayoutNextStatus) {
+                        "approved" -> "Approve payout request"
+                        "rejected" -> "Reject payout request"
+                        "processing" -> "Start payout processing"
+                        "paid" -> "Confirm organiser payout"
+                        "failed" -> "Record payout failure"
+                        "reversed" -> "Record payout reversal"
+                        else -> "Update payout request"
+                    },
+                    color=Ink,fontWeight=FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement=Arrangement.spacedBy(9.dp)) {
+                    Text(
+                        "${payout.optString("organisation_name")} · ${amount(payout)}",
+                        color=Muted,fontSize=11.sp
+                    )
+                    if (finalAction) {
+                        OutlinedTextField(
+                            value=organiserPayoutProviderReference,
+                            onValueChange={organiserPayoutProviderReference=it;organiserPayoutFormError=null},
+                            modifier=Modifier.fillMaxWidth(),
+                            label={Text("Provider transaction reference")},
+                            singleLine=true
+                        )
+                    }
+                    OutlinedTextField(
+                        value=organiserPayoutNote,
+                        onValueChange={organiserPayoutNote=it;organiserPayoutFormError=null},
+                        modifier=Modifier.fillMaxWidth(),
+                        label={Text("Operator note / evidence")},
+                        minLines=2,
+                        maxLines=4
+                    )
+                    if (organiserPayoutNextStatus == "paid") {
+                        Text(
+                            "Only confirm payment after the provider or bank transfer is independently confirmed. This action posts the payout debit to the organiser settlement ledger.",
+                            color=Danger,fontSize=10.sp,lineHeight=14.sp
+                        )
+                    } else if (organiserPayoutNextStatus == "reversed") {
+                        Text(
+                            "Only record a reversal after the provider confirms that the previously paid transfer was reversed. This restores the settlement balance.",
+                            color=Danger,fontSize=10.sp,lineHeight=14.sp
+                        )
+                    }
+                    if (organiserPayoutFormError != null) {
+                        Text(organiserPayoutFormError!!,color=Danger,fontSize=10.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val note=organiserPayoutNote.trim()
+                        val reference=organiserPayoutProviderReference.trim()
+                        when {
+                            note.length !in 5..500 -> organiserPayoutFormError="Enter a note between 5 and 500 characters."
+                            finalAction && reference.length < 3 -> organiserPayoutFormError="Enter the provider transaction reference."
+                            else -> {
+                                onResolveOrganiserPayout(
+                                    payout.optString("id"),
+                                    organiserPayoutNextStatus,
+                                    reference,
+                                    note
+                                )
+                                selectedOrganiserPayout=null
+                            }
+                        }
+                    },
+                    enabled=!busy,
+                    colors=ButtonDefaults.buttonColors(containerColor=Ink)
+                ) { Text("Confirm") }
+            },
+            dismissButton = {
+                TextButton(onClick={selectedOrganiserPayout=null},enabled=!busy) {
+                    Text("Cancel",color=Muted)
+                }
+            },
+            shape=RoundedCornerShape(20.dp),
+            containerColor=CardWhite
+        )
+    }
+
+    if (selectedPayment != null) {
+        val payment = selectedPayment!!
+        AlertDialog(
+            onDismissRequest = { if (!busy) selectedPayment = null },
+            title = { Text("Request Chapa refund",color=Ink,fontWeight=FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement=Arrangement.spacedBy(9.dp)) {
+                    Text(
+                        "Payment ${payment.optString("merchant_reference")} · ${amount(payment)}",
+                        color=Muted,fontSize=11.sp
+                    )
+                    OutlinedTextField(
+                        value=amountEtb,
+                        onValueChange={amountEtb=it;formError=null},
+                        modifier=Modifier.fillMaxWidth(),
+                        label={Text("Refund amount in ETB")},
+                        placeholder={Text("Leave blank for full refund")},
+                        singleLine=true,
+                        keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal)
+                    )
+                    OutlinedTextField(
+                        value=reason,
+                        onValueChange={reason=it;formError=null},
+                        modifier=Modifier.fillMaxWidth(),
+                        label={Text("Reason for refund")},
+                        minLines=2,
+                        maxLines=3
+                    )
+                    Text(
+                        "Chapa must confirm this refund. TIQET will then keep the order in finance review until ticket and settlement reconciliation is complete.",
+                        color=Muted,fontSize=10.sp,lineHeight=14.sp
+                    )
+                    if (formError != null) Text(formError!!,color=Danger,fontSize=10.sp)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cleanedReason = reason.trim()
+                        val amountMinor = if (amountEtb.isBlank()) null else runCatching {
+                            java.math.BigDecimal(amountEtb.trim())
+                                .movePointRight(2)
+                                .setScale(0, java.math.RoundingMode.UNNECESSARY)
+                                .longValueExact()
+                        }.getOrNull()
+                        val invalidAmount = amountEtb.isNotBlank() && (amountMinor == null || amountMinor < 100)
+                        if (cleanedReason.isBlank() || cleanedReason.length > 400) {
+                            formError = "Enter a reason from 1 to 400 characters."
+                        } else if (invalidAmount) {
+                            formError = "Enter a valid ETB amount with up to two decimal places (minimum ETB 1.00)."
+                        } else if (idempotencyKey.isBlank()) {
+                            formError = "A safe request key could not be created. Close and reopen this form."
+                        } else {
+                            onRequestRefund(payment.optString("payment_id"),amountMinor,cleanedReason,idempotencyKey)
+                            selectedPayment = null
+                        }
+                    },
+                    enabled=!busy,
+                    colors=ButtonDefaults.buttonColors(containerColor=Ink)
+                ) { Text("Send refund request") }
+            },
+            dismissButton = {
+                TextButton(onClick={selectedPayment=null},enabled=!busy) { Text("Cancel",color=Muted) }
+            },
+            shape=RoundedCornerShape(20.dp),
+            containerColor=CardWhite
+        )
     }
 }
 
@@ -1297,7 +1908,7 @@ private fun FinanceRecord(title: String, subtitle: String, reference: String, st
 
 @Composable
 private fun StatusPill(status: String) {
-    val good = status.lowercase() in listOf("paid","succeeded","verified","approved","reconciled")
+    val good = status.lowercase() in listOf("paid","succeeded","verified","approved","reconciled","partially_refunded")
     Box(
         Modifier.clip(RoundedCornerShape(20.dp))
             .background(if(good) TealPale else AccentPale)
