@@ -1,0 +1,58 @@
+name: Build Tiqet Control Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - tiqet-control-v1
+    paths:
+      - 'tiqet-control-android/**'
+      - '.github/workflows/build-tiqet-control.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Tiqet Control debug APK
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+
+    steps:
+      - name: Check out Tiqet Control source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK API 37
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Install Android platform and build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platforms;android-37" "build-tools;36.0.0"
+          test -f "$ANDROID_HOME/platforms/android-37/android.jar"
+
+      - name: Set up Gradle 9.6.0
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+
+      - name: Assemble Control debug APK
+        run: gradle --no-daemon -p tiqet-control-android assembleDebug
+
+      - name: Upload Tiqet Control APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiqet-control-debug-apk
+          path: tiqet-control-android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
