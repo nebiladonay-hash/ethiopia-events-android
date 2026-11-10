@@ -446,6 +446,7 @@ private fun ControlWorkspace(
                             }
                         }
                     },
+                    onRefresh = { refresh() },
                     onVerifyRefund = { refundId ->
                         scope.launch {
                             busy = true
@@ -1197,7 +1198,8 @@ private fun FinanceScreen(
     refundsDashboard: JSONObject,
     busy: Boolean,
     onRequestRefund: (paymentId: String, amountMinor: Long?, reason: String, idempotencyKey: String) -> Unit,
-    onVerifyRefund: (refundId: String) -> Unit
+    onVerifyRefund: (refundId: String) -> Unit,
+    onRefresh: () -> Unit
 ) {
     val summary = finance.optJSONObject("summary") ?: JSONObject()
     val payments = finance.optJSONArray("recent_payments") ?: JSONArray()
@@ -1223,7 +1225,10 @@ private fun FinanceScreen(
     ) {
         item {
             Column {
-                Text("Financial operations",color=Ink,fontSize=23.sp,fontWeight=FontWeight.Bold)
+                Row(verticalAlignment=Alignment.CenterVertically) {
+                    Text("Financial operations",color=Ink,fontSize=23.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
+                    TextButton(onClick=onRefresh,enabled=!busy) { Text("Refresh",color=Teal,fontSize=11.sp) }
+                }
                 Text("Verified payments, refund requests and settlement review.",color=Muted,fontSize=11.sp,lineHeight=16.sp)
                 if (busy) {
                     Spacer(Modifier.height(8.dp))
