@@ -1308,7 +1308,7 @@ private fun FinanceScreen(
                     Text(row.optString("reason"),color=Muted,fontSize=10.sp)
                     Text("Payment: ${row.optString("payment_merchant_reference")}",color=Muted,fontSize=9.sp)
                     Text("Refund ref: ${row.optString("provider_reference").ifBlank { row.optString("merchant_reference") }}",color=Muted,fontSize=9.sp)
-                    if (row.optString("status") in listOf("requested","pending") &&
+                    if (row.optString("status") in listOf("requested","pending","submission_unknown") &&
                         row.optString("provider_reference").isNotBlank()) {
                         TextButton(
                             onClick = { onVerifyRefund(row.optString("id")) },
