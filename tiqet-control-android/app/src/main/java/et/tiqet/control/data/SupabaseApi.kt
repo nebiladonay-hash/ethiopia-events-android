@@ -12,7 +12,8 @@ data class ControlSession(
     val accessToken: String,
     val refreshToken: String,
     val userId: String,
-    val email: String
+    val email: String,
+    val isPlatformOwner: Boolean = false
 )
 
 class SupabaseApi(
@@ -33,7 +34,8 @@ class SupabaseApi(
             accessToken = json.getString("access_token"),
             refreshToken = json.optString("refresh_token"),
             userId = user.getString("id"),
-            email = user.optString("email", email.trim())
+            email = user.optString("email", email.trim()),
+            isPlatformOwner = user.optJSONObject("app_metadata")?.optString("tiqet_role") == "platform_owner"
         )
     }
 
@@ -96,6 +98,34 @@ class SupabaseApi(
 
     suspend fun getRefundsDashboard(session: ControlSession, limit: Int = 50): JSONObject =
         rpc(session, "get_tiqet_refunds_dashboard", JSONObject().put("p_limit", limit))
+
+    suspend fun getChapaPayoutDestinations(session: ControlSession): JSONArray = withContext(Dispatchers.IO) {
+        val result = request("GET", "/functions/v1/chapa-payout-banks", session = session)
+        result.optJSONArray("destinations")
+            ?: throw ApiException("Chapa did not return a payout destination list.")
+    }
+
+    suspend fun createPlatformPayout(
+        session: ControlSession,
+        amountMinor: Long,
+        bankSlug: String,
+        bankName: String,
+        accountName: String,
+        accountNumber: String
+    ): JSONObject = withContext(Dispatchers.IO) {
+        if (amountMinor < 100) throw ApiException("Minimum withdrawal is ETB 1.00.")
+        request(
+            method = "POST",
+            path = "/functions/v1/create-platform-payout",
+            body = JSONObject()
+                .put("amount_etb", amountMinor.toDouble() / 100.0)
+                .put("bank_slug", bankSlug)
+                .put("bank_name", bankName)
+                .put("account_name", accountName)
+                .put("account_number", accountNumber),
+            session = session
+        )
+    }
 
     suspend fun createChapaRefund(
         session: ControlSession,
