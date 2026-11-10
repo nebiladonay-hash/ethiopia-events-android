@@ -133,15 +133,15 @@ Deno.serve(async (req) => {
   const providerStatus = String(data?.status ?? '').toUpperCase()
   const providerReference = String(data?.chapa_reference ?? '')
   if (providerResponse.ok && providerJson?.status === 'success' && providerReference) {
-    const mapped = providerStatus === 'SUCCESS' ? 'succeeded'
-      : providerStatus === 'FAILED' ? 'failed' : 'pending'
+    // Creation confirms that Chapa accepted a refund request, not that the
+    // customer has received the funds. Keep it pending until Verify Refund
+    // (or a reconciled final webhook) confirms SUCCESS.
     const { data: recorded, error: recordError } = await admin.rpc('record_chapa_refund_result', {
-      p_refund_id: operation.id, p_status: mapped, p_provider_reference: providerReference,
-      p_provider_payload: safePayload,
-      p_error_message: mapped === 'failed' ? String(providerJson?.message ?? 'Chapa reported refund failure') : null,
+      p_refund_id: operation.id, p_status: 'pending', p_provider_reference: providerReference,
+      p_provider_payload: safePayload, p_error_message: null,
     })
     if (recordError) return json({ error: 'Chapa accepted the request but TIQET could not save its result. Keep this request open for reconciliation.', refund_id: operation.id }, 503)
-    return json({ refund_id: operation.id, status: mapped, provider_reference: providerReference, result: recorded })
+    return json({ refund_id: operation.id, status: 'pending', provider_reference: providerReference, result: recorded })
   }
 
   const definiteFailure = providerResponse.status >= 400 && providerResponse.status < 500 &&
