@@ -484,18 +484,29 @@ private fun fitTiqetEventBanner(original: ByteArray): ByteArray {
 
 """
 replace_once(api, "class TiqetApi(context: Context) {", banner_helper + "class TiqetApi(context: Context) {", "Add automatic event banner fitter")
-replace_once(
-    api,
-    "                    ticketTypeName = cheapest?.optString(\"name\")?.takeIf { !it.isNullOrBlank() && it != \"null\" }\n                ),",
-    "                    ticketTypeName = cheapest?.optString(\"name\")?.takeIf { !it.isNullOrBlank() && it != \"null\" },\n"
-    "                    ticketOptions = (0 until ticketTypes.length()).mapNotNull { ticketIndex ->\n"
-    "                        val option = ticketTypes.optJSONObject(ticketIndex) ?: return@mapNotNull null\n"
-    "                        val id = option.optString(\"id\")\n"
-    "                        if (id.isBlank() || id == \"null\") null else TicketOption(id, option.optString(\"name\", \"Regular\"), option.optDouble(\"price_etb\"))\n"
-    "                    }\n"
-    "                ),",
-    "Spotlight ticket tier mapping"
-)
+api_source = api.read_text()
+spotlight_start = api_source.find("    fun fetchSpotlightEvents(")
+spotlight_end = api_source.find("    fun fetchMyOrganisations(", spotlight_start + 1)
+if spotlight_start < 0 or spotlight_end < 0:
+    raise SystemExit("Could not find Spotlight API reader boundaries.")
+spotlight_region = api_source[spotlight_start:spotlight_end]
+old_spotlight_event = """                    ticketTypeName = cheapest?.optString("name")?.takeIf { !it.isNullOrBlank() && it != "null" }
+                ),"""
+new_spotlight_event = """                    ticketTypeName = cheapest?.optString("name")?.takeIf { !it.isNullOrBlank() && it != "null" },
+                    ticketOptions = (0 until ticketTypes.length()).mapNotNull { ticketIndex ->
+                        val option = ticketTypes.optJSONObject(ticketIndex) ?: return@mapNotNull null
+                        val id = option.optString("id")
+                        if (id.isBlank() || id == "null") null else TicketOption(id, option.optString("name", "Regular"), option.optDouble("price_etb"))
+                    }
+                ),"""
+if spotlight_region.count(old_spotlight_event) != 1:
+    raise SystemExit(
+        "Spotlight ticket tier mapping: expected one matching Event constructor inside fetchSpotlightEvents; "
+        f"found {spotlight_region.count(old_spotlight_event)}"
+    )
+spotlight_region = spotlight_region.replace(old_spotlight_event, new_spotlight_event, 1)
+api.write_text(api_source[:spotlight_start] + spotlight_region + api_source[spotlight_end:])
+
 
 # ---------- Customer event cards and checkout ticket selection ----------
 replace_once(main,
