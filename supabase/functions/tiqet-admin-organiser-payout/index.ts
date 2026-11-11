@@ -101,6 +101,7 @@ Deno.serve(async (req) => {
     p_status: nextStatus,
     p_provider_reference: providerReference || null,
     p_operator_note: operatorNote,
+    p_actor_user_id: actor.id,
   });
   if (resolveError) {
     console.error("Could not resolve organiser payout request", resolveError.message);
