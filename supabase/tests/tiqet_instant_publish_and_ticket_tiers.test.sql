@@ -35,6 +35,7 @@ set payout_account_last4='6789'
 where id='20000000-0000-4000-8000-000000000002';
 
 create temporary table tiqet_test_created_event(event_id uuid not null);
+grant select on tiqet_test_created_event to anon, authenticated;
 
 insert into tiqet_test_created_event(event_id)
 select (public.create_event_with_ticket_options(
