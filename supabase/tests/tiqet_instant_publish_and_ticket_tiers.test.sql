@@ -248,6 +248,13 @@ do $cross_assign_test$ begin
 end $cross_assign_test$;
 reset role;
 
+-- The old approval RPC is removed; the admin app no longer has an approval route.
+do $no_event_approval_rpc$ begin
+  if to_regprocedure('public.review_event_submission(uuid,text,text)') is not null then
+    raise exception 'TEST_ASSERT: legacy event approval RPC still exists';
+  end if;
+end $no_event_approval_rpc$;
+
 -- Spotlight eligibility is now about a live, future event with artwork, not pre-publication approval.
 select set_config('request.jwt.claim.sub','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',true);
 select public.set_tiqet_event_spotlight(
