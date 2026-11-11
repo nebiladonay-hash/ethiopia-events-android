@@ -179,7 +179,7 @@ select public.set_tiqet_event_spotlight(
 );
 
 do $spotlight_no_approval_test$ begin
-  if (select count(*) from public.get_tiqet_spotlight_events(8)->'events') <> 1 then
+  if jsonb_array_length(public.get_tiqet_spotlight_events(8)->'events') <> 1 then
     raise exception 'TEST_ASSERT: public Spotlight still requires the approval flag';
   end if;
 end $spotlight_no_approval_test$;
