@@ -53,7 +53,9 @@ if "fun userFacingError(error: Throwable, fallback: String): String" not in api:
         val status = apiError?.httpCode
         return when {
             error is UnknownHostException || error is ConnectException ||
-                message.contains("unknownhostexception") || message.contains("unable to resolve host") ->
+                message.contains("unknownhostexception") || message.contains("unable to resolve host") ||
+                message.contains("no address associated with hostname") || message.contains("failed to connect") ||
+                message.contains("network is unreachable") || message.contains("connection reset") ->
                 "Couldn't connect to Tiqet. Check your internet connection and try again."
             error is SocketTimeoutException || message.contains("sockettimeoutexception") ||
                 message.contains("timed out") ->
@@ -108,7 +110,7 @@ replace_once(
 )
 auth_source = auth_path.read_text()
 auth_source = auth_source.replace(
-    'The Tiqet backend is not connected yet. Configure SUPABASE_URL and SUPABASE_ANON_KEY in the repository\\'s GitHub Actions variables, then rebuild the APK.',
+    "The Tiqet backend is not connected yet. Configure SUPABASE_URL and SUPABASE_ANON_KEY in the repository's GitHub Actions variables, then rebuild the APK.",
     "Tiqet couldn't connect just now. Check your internet connection and try again. If it keeps happening, contact support.",
     1
 )
