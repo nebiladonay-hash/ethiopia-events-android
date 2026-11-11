@@ -237,7 +237,6 @@ private fun ControlWorkspace(
     var overview by remember { mutableStateOf(JSONObject()) }
     var organisers by remember { mutableStateOf(JSONArray()) }
     var verifiedOrganisers by remember { mutableStateOf(JSONArray()) }
-    var events by remember { mutableStateOf(JSONArray()) }
     var publishedEvents by remember { mutableStateOf(JSONArray()) }
     var spotlightEvents by remember { mutableStateOf(JSONArray()) }
     var staff by remember { mutableStateOf(JSONArray()) }
@@ -261,7 +260,6 @@ private fun ControlWorkspace(
             error = null
             try {
                 overview = api.getOverview(session)
-                events = api.getPendingEvents(session)
                 if (overview.optBoolean("admin_access")) {
                     publishedEvents = api.getPublishedEventsForReview(session)
                     spotlightEvents = try { api.getSpotlightEvents(session) } catch (_: Exception) { JSONArray() }
@@ -416,21 +414,9 @@ private fun ControlWorkspace(
                     }
                 )
                 ControlTab.EVENTS -> EventQueueScreen(
-                    items = events,
                     publishedItems = publishedEvents,
                     spotlightItems = spotlightEvents,
                     busy = busy,
-                    onReview = { id, decision, notes ->
-                        scope.launch {
-                            busy = true
-                            try {
-                                api.reviewEvent(session, id, decision, notes)
-                                notice = if (decision == "approve") "Event approved and published." else "Event returned to the organiser for changes."
-                                refresh()
-                            } catch (e: Exception) { error = e.message ?: "Could not review event." }
-                            finally { busy = false }
-                        }
-                    },
                     onFlagPublished = { id, reason ->
                         scope.launch {
                             busy = true
@@ -610,7 +596,7 @@ private fun OverviewScreen(
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MetricCard("EVENT REVIEWS", overview.optInt("pending_events"), Accent, Modifier.weight(1f))
+                MetricCard("LIVE EVENTS", overview.optInt("published_events"), Accent, Modifier.weight(1f))
                 if (isAdmin) MetricCard("ORGANISERS", overview.optInt("pending_organisers"), Teal, Modifier.weight(1f))
             }
         }
@@ -627,11 +613,11 @@ private fun OverviewScreen(
                 Text("OPERATIONS", color=Color(0xFFA9C4BC), fontSize=9.sp, fontWeight=FontWeight.Bold, letterSpacing=1.4.sp)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    if (isSuperAdmin) "You have full platform control." else if (isAdmin) "You can verify organisers and manage reviews." else "You can review submitted events.",
+                    if (isSuperAdmin) "You have full platform control." else if (isAdmin) "You can manage organisers, live listings and platform finance." else "You can monitor live listings and reported events.",
                     color=Color.White, fontSize=17.sp, fontWeight=FontWeight.SemiBold
                 )
                 Spacer(Modifier.height(5.dp))
-                Text("Every approval and staff permission change is recorded in the audit log.", color=Color(0xFFC5D5D0), fontSize=11.sp, lineHeight=16.sp)
+                Text("Organiser access and staff permission changes are recorded in the audit log.", color=Color(0xFFC5D5D0), fontSize=11.sp, lineHeight=16.sp)
             }
         }
         item {
@@ -639,8 +625,8 @@ private fun OverviewScreen(
         }
         item {
             QueueShortcut(
-                title = "Event submissions",
-                subtitle = "${overview.optInt("pending_events")} waiting for review",
+                title = "Live event listings",
+                subtitle = "${overview.optInt("published_events")} public events",
                 onClick = { onOpenTab(ControlTab.EVENTS) }
             )
         }
@@ -867,15 +853,12 @@ private fun OrganiserQueueScreen(
 
 @Composable
 private fun EventQueueScreen(
-    items: JSONArray,
     publishedItems: JSONArray,
     spotlightItems: JSONArray,
     busy: Boolean,
-    onReview: (String, String, String) -> Unit,
     onFlagPublished: (String,String) -> Unit,
     onSetSpotlight: (String, Boolean, Int, String?, String) -> Unit
 ) {
-    var notes by remember { mutableStateOf("") }
     var flagReason by remember { mutableStateOf("") }
     var selectedPublishedEvent by remember { mutableStateOf<JSONObject?>(null) }
     var showFlagConfirm by remember { mutableStateOf(false) }
@@ -916,46 +899,15 @@ private fun EventQueueScreen(
         contentPadding=PaddingValues(bottom=28.dp)
     ) {
         item {
-            ScreenHeading("Event moderation","Review new submissions and investigate published listings reported or flagged for review.")
-        }
-        item {
-            OutlinedTextField(
-                value=notes,onValueChange={notes=it},
-                modifier=Modifier.fillMaxWidth(),
-                label={Text("Review note (optional)")},
-                shape=RoundedCornerShape(13.dp),minLines=1,maxLines=3
-            )
-        }
-        item {
-            Text("PENDING SUBMISSIONS · ${items.length()}",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
-        }
-        if(items.length()==0) {
-            item { EmptyState("No pending event submissions","New events from manual-review organisers appear here.") }
-        } else {
-            items((0 until items.length()).mapNotNull{items.optJSONObject(it)},key={it.optString("id")}) { event ->
-                ReviewCard(
-                    title=event.optString("title","Untitled event"),
-                    subtitle=event.optString("category"),
-                    meta=listOf(event.optString("starts_at").replace("T"," ").take(16),event.optString("venue_name"),event.optString("city"))
-                        .filter{it.isNotBlank()}.joinToString(" · "),
-                    note=event.optString("description"),
-                    busy=busy,
-                    actions=listOf(
-                        ReviewAction("Request changes","request_changes",Muted),
-                        ReviewAction("Reject","reject",Danger),
-                        ReviewAction("Approve & publish","approve",Teal)
-                    ),
-                    onAction={decision->onReview(event.optString("id"),decision,notes.trim())}
-                )
-            }
+            ScreenHeading("Live event listings","Browse published events, curate Tiqet Spotlight and unlist reported events when necessary.")
         }
         item {
             Spacer(Modifier.height(8.dp))
-            Text("PUBLISHED EVENTS · ${publishedItems.length()}",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
-            Text("Flagging removes a published event from public listings and sends it back to the review queue.",color=Muted,fontSize=10.sp,lineHeight=15.sp)
+            Text("LIVE EVENTS · ${publishedItems.length()}",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
+            Text("Events publish immediately. You can still unlist a reported event after publication.",color=Muted,fontSize=10.sp,lineHeight=15.sp)
         }
         if(publishedItems.length()==0) {
-            item { EmptyState("No published events","Published events will appear here for ongoing moderation.") }
+            item { EmptyState("No live events yet","New organiser events will appear here as soon as they are published.") }
         } else {
             items((0 until publishedItems.length()).mapNotNull{publishedItems.optJSONObject(it)},key={"published-${it.optString("id")}"}) { event ->
                 val eventId = event.optString("id")
