@@ -541,61 +541,26 @@ replace_once(main,
     "    var selectedTicketOption by remember(event.id) { mutableStateOf(event.ticketOptions.firstOrNull()) }\n",
     "Selected ticket tier state")
 
-old_hero = """        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(200.dp)
-                .clip(RoundedCornerShape(22.dp))
-                .background(BrandRed),
-            contentAlignment = Alignment.Center
-        ) {
-            TicketMark(color = BrandIvory.copy(alpha = 0.9f), modifier = Modifier.size(86.dp))
-        }"""
-new_hero = """        if (!event.imageUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = event.imageUrl,
-                contentDescription = "Event poster for ${event.title}",
-                modifier = Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(22.dp)),
-                contentScale = ContentScale.Crop
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(BrandRed),
-                contentAlignment = Alignment.Center
-            ) {
-                TicketMark(color = BrandIvory.copy(alpha = 0.9f), modifier = Modifier.size(86.dp))
-            }
-        }"""
-replace_once(main, old_hero, new_hero, "Show uploaded event poster on event detail page")
-replace_once(
-    main,
-    """    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BrandIvory)
-            .padding(horizontal = 21.dp)
-    ) {
-        Spacer(Modifier.height(15.dp))""",
-    """    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BrandIvory)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 21.dp)
-    ) {
-        Spacer(Modifier.height(15.dp))""",
-    "Allow event details with multiple ticket tiers to scroll"
-)
-replace_once(
-    main,
-    "        Spacer(Modifier.weight(1f))\n        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {",
-    "        Spacer(Modifier.height(16.dp))\n        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {",
-    "Keep checkout controls in the scrollable event detail"
-)
+# Event details may contain three ticket tiers; make the whole detail column scrollable on small phones.
+main_source = main.read_text()
+detail_start = main_source.find("private fun EventDetailScreen(")
+if detail_start < 0:
+    raise SystemExit("Could not find the event detail composable.")
+modifier_start = main_source.find(".fillMaxSize()", detail_start)
+modifier_end = main_source.find(") {", modifier_start)
+if modifier_start < 0 or modifier_end < 0:
+    raise SystemExit("Could not locate the event detail root modifier.")
+if ".verticalScroll(rememberScrollState())" not in main_source[detail_start:modifier_end]:
+    insert_at = modifier_start + len(".fillMaxSize()")
+    main_source = main_source[:insert_at] + ".verticalScroll(rememberScrollState())" + main_source[insert_at:]
+detail_end = main_source.find("\n@Composable", detail_start + 1)
+if detail_end < 0:
+    detail_end = len(main_source)
+detail_region = main_source[detail_start:detail_end]
+if detail_region.count("Spacer(Modifier.weight(1f))") == 1:
+    detail_region = detail_region.replace("Spacer(Modifier.weight(1f))", "Spacer(Modifier.height(16.dp))", 1)
+    main_source = main_source[:detail_start] + detail_region + main_source[detail_end:]
+main.write_text(main_source)
 
 old_ticket_block = """        Text("Tickets", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(10.dp))
