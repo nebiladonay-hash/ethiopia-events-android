@@ -64,9 +64,6 @@ class SupabaseApi(
             .put("p_reason", reason)
     )
 
-    suspend fun getPendingEvents(session: ControlSession): JSONArray =
-        getArray(session, "/rest/v1/events?select=id,title,description,category,starts_at,venue_name,address,city,organisation_id,created_at&status=eq.submitted&approval_status=eq.pending&order=created_at.asc")
-
     suspend fun getPublishedEventsForReview(session: ControlSession, limit: Int = 50): JSONArray {
         val result = rpc(
             session,
@@ -252,20 +249,6 @@ class SupabaseApi(
         "review_organiser_application",
         JSONObject()
             .put("p_organisation_id", organisationId)
-            .put("p_decision", decision)
-            .put("p_notes", notes)
-    )
-
-    suspend fun reviewEvent(
-        session: ControlSession,
-        eventId: String,
-        decision: String,
-        notes: String
-    ): JSONObject = rpc(
-        session,
-        "review_event_submission",
-        JSONObject()
-            .put("p_event_id", eventId)
             .put("p_decision", decision)
             .put("p_notes", notes)
     )
