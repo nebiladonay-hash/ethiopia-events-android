@@ -1,5 +1,9 @@
 begin;
 
+insert into auth.users(id,email) values
+ ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','admin@tiqet.test'),
+ ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','organizer@tiqet.test');
+
 insert into public.organisations(id,owner_id,name,status) values
  ('20000000-0000-4000-8000-000000000001','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','Trusted Organizer', 'verified'),
  ('20000000-0000-4000-8000-000000000002','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','New Organizer', 'pending');
