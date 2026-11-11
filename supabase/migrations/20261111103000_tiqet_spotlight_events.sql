@@ -55,12 +55,25 @@ begin
         'image_url', e.image_url,
         'organisation_id', e.organisation_id,
         'organisation_name', o.name,
+        'minimum_price_etb', cheapest.price_etb,
+        'ticket_type_id', cheapest.id,
+        'ticket_type_name', cheapest.name,
         'featured_label', s.featured_label
       ) as item
     from public.tiqet_event_spotlight s
     join public.events e on e.id = s.event_id
     join public.organisations o on o.id = e.organisation_id
-    where s.starts_at <= now()
+    left join lateral (
+      select tt.id, tt.name, tt.price_etb
+      from public.ticket_types tt
+      where tt.event_id = e.id
+      order by tt.price_etb asc
+      limit 1
+    ) cheapest on true
+    where o.status = 'verified'::public.organisation_status
+      and e.image_url is not null
+      and btrim(e.image_url) <> ''
+      and s.starts_at <= now()
       and (s.ends_at is null or s.ends_at > now())
       and e.status = 'published'::public.event_status
       and e.approval_status = 'approved'
@@ -107,6 +120,16 @@ begin
   if p_featured then
     if v_event.status <> 'published'::public.event_status or v_event.approval_status <> 'approved' then
       raise exception 'Only approved and published events can be featured';
+    end if;
+    if not exists (
+      select 1 from public.organisations o
+      where o.id = v_event.organisation_id
+        and o.status = 'verified'::public.organisation_status
+    ) then
+      raise exception 'The event organiser must be verified before featuring';
+    end if;
+    if v_event.image_url is null or btrim(v_event.image_url) = '' then
+      raise exception 'The organiser must upload an event banner before featuring';
     end if;
     if v_event.starts_at <= now() then
       raise exception 'Past or currently running events cannot be featured';
