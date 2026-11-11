@@ -859,6 +859,8 @@ private fun EventQueueScreen(
     var spotlightSortOrder by remember { mutableStateOf("100") }
     var spotlightLabel by remember { mutableStateOf("Tiqet Spotlight") }
     var spotlightExpiryDays by remember { mutableStateOf(7) }
+    var spotlightOriginalEndsAt by remember { mutableStateOf<String?>(null) }
+    var spotlightExpiryChanged by remember { mutableStateOf(false) }
     var spotlightExpiryExpanded by remember { mutableStateOf(false) }
     val spotlightById = remember(spotlightItems) {
         (0 until spotlightItems.length())
@@ -872,11 +874,13 @@ private fun EventQueueScreen(
         selectedSpotlightEvent = event
         spotlightSortOrder = existing?.optInt("spotlight_sort_order", 100)?.toString() ?: "100"
         spotlightLabel = existing?.optString("featured_label")?.takeIf { !it.isNullOrBlank() } ?: "Tiqet Spotlight"
+        spotlightOriginalEndsAt = existing?.optString("spotlight_ends_at")?.takeIf { it.isNotBlank() }
         spotlightExpiryDays = if (existing == null) {
             7
         } else {
-            spotlightExpiryPreset(existing.optString("spotlight_ends_at").takeIf { it.isNotBlank() })
+            spotlightExpiryPreset(spotlightOriginalEndsAt)
         }
+        spotlightExpiryChanged = false
         spotlightExpiryExpanded = false
         showSpotlightDialog = true
     }
@@ -1066,6 +1070,18 @@ private fun EventQueueScreen(
                         shape = RoundedCornerShape(12.dp)
                     )
                     Text("AUTOMATIC EXPIRY", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text(
+                        when {
+                            currentSpotlight != null && !spotlightExpiryChanged && spotlightOriginalEndsAt == null ->
+                                "Current setting: no automatic expiry. It will stay that way unless you change it."
+                            currentSpotlight != null && !spotlightExpiryChanged ->
+                                "Current end: ${spotlightOriginalEndsAt?.replace("T", " ")?.take(16)} UTC. Leave this setting unchanged to preserve the exact time."
+                            else -> "The selected duration starts when you save these settings."
+                        },
+                        color = Muted,
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp
+                    )
                     Box {
                         OutlinedButton(
                             onClick = { spotlightExpiryExpanded = true },
@@ -1080,12 +1096,20 @@ private fun EventQueueScreen(
                             listOf(1, 3, 7, 14, 30).forEach { days ->
                                 DropdownMenuItem(
                                     text = { Text("${days} days") },
-                                    onClick = { spotlightExpiryDays = days; spotlightExpiryExpanded = false }
+                                    onClick = {
+                                        spotlightExpiryDays = days
+                                        spotlightExpiryChanged = true
+                                        spotlightExpiryExpanded = false
+                                    }
                                 )
                             }
                             DropdownMenuItem(
                                 text = { Text("No automatic expiry") },
-                                onClick = { spotlightExpiryDays = 0; spotlightExpiryExpanded = false }
+                                onClick = {
+                                    spotlightExpiryDays = 0
+                                    spotlightExpiryChanged = true
+                                    spotlightExpiryExpanded = false
+                                }
                             )
                         }
                     }
@@ -1096,8 +1120,13 @@ private fun EventQueueScreen(
                     enabled = !busy && sortOrderValue != null && sortOrderValue in 0..10000 &&
                         spotlightLabel.trim().isNotEmpty() && bannerUrl.isNotBlank(),
                     onClick = {
-                        val endsAt = if (spotlightExpiryDays == 0) null
-                            else Instant.now().plusSeconds(spotlightExpiryDays.toLong() * 24L * 60L * 60L).toString()
+                        val endsAt = if (!spotlightExpiryChanged && currentSpotlight != null) {
+                            spotlightOriginalEndsAt
+                        } else if (spotlightExpiryDays == 0) {
+                            null
+                        } else {
+                            Instant.now().plusSeconds(spotlightExpiryDays.toLong() * 24L * 60L * 60L).toString()
+                        }
                         showSpotlightDialog = false
                         onSetSpotlight(
                             configuredSpotlightEvent.optString("id"),
