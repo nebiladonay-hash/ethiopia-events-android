@@ -76,6 +76,32 @@ class SupabaseApi(
         return result.optJSONArray("events") ?: JSONArray()
     }
 
+    suspend fun getSpotlightEvents(session: ControlSession, limit: Int = 20): JSONArray {
+        val result = rpc(
+            session,
+            "get_tiqet_spotlight_events",
+            JSONObject().put("p_limit", limit.coerceIn(1, 20))
+        )
+        return result.optJSONArray("events") ?: JSONArray()
+    }
+
+    suspend fun setEventSpotlight(
+        session: ControlSession,
+        eventId: String,
+        featured: Boolean,
+        sortOrder: Int = 100,
+        endsAt: String? = null,
+        label: String = "Tiqet Spotlight"
+    ): JSONObject {
+        val body = JSONObject()
+            .put("p_event_id", eventId)
+            .put("p_featured", featured)
+            .put("p_sort_order", sortOrder.coerceIn(0, 10000))
+            .put("p_featured_label", label)
+        body.put("p_ends_at", endsAt)
+        return rpc(session, "set_tiqet_event_spotlight", body)
+    }
+
     suspend fun flagPublishedEvent(session: ControlSession, eventId: String, reason: String): JSONObject =
         rpc(
             session,
