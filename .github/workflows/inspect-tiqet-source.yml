@@ -1,6 +1,11 @@
 name: Inspect Tiqet V7.1 Android source
 
 on:
+  push:
+    branches:
+      - tiqet-spotlight-discovery
+    paths:
+      - '.github/workflows/inspect-tiqet-source.yml'
   workflow_dispatch:
 
 permissions:
