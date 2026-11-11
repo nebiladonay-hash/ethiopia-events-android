@@ -259,7 +259,7 @@ private fun ControlWorkspace(
                 events = api.getPendingEvents(session)
                 if (overview.optBoolean("admin_access")) {
                     publishedEvents = api.getPublishedEventsForReview(session)
-                    spotlightEvents = api.getSpotlightEvents(session)
+                    spotlightEvents = try { api.getSpotlightEvents(session) } catch (_: Exception) { JSONArray() }
                     organisers = api.getOrganisers(session)
                     verifiedOrganisers = api.getVerifiedOrganisers(session)
                     audit = api.getAuditLog(session)
