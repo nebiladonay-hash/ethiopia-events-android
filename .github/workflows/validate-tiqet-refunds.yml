@@ -3,9 +3,10 @@ name: Validate TIQET Chapa refund backend
 on:
   push:
     branches:
-      - tiqet-refund-backend-v1
+      - tiqet-chapa-refunds
     paths:
       - 'supabase/functions/create-chapa-refund/**'
+      - 'supabase/functions/create-chapa-checkout/**'
       - 'supabase/functions/verify-chapa-refund/**'
       - 'supabase/functions/chapa-webhook/**'
       - 'supabase/migrations/**'
@@ -37,6 +38,8 @@ jobs:
       - name: Check Chapa checkout and marketplace settlement functions
         run: |
           deno check supabase/functions/create-chapa-checkout/index.ts
+          grep -q 'split_value: organiserNetEtb' supabase/functions/create-chapa-checkout/index.ts
+          ! grep -q 'split_value: organiserSplitMinor' supabase/functions/create-chapa-checkout/index.ts
           deno check supabase/functions/create-chapa-organizer-subaccount/index.ts
           deno check supabase/functions/create-platform-payout/index.ts
       - name: Check migration safety markers
