@@ -56,8 +56,7 @@ replace_once(organizer,
     "    var vipQuantity by remember { mutableStateOf(\"50\") }\n"
     "    var includeVvip by remember { mutableStateOf(false) }\n"
     "    var vvipPrice by remember { mutableStateOf(\"\") }\n"
-    "    var vvipQuantity by remember { mutableStateOf(\"25\") }\n"
-
+    "    var vvipQuantity by remember { mutableStateOf(\"25\") }\n",
     "Simple regular VIP VVIP ticket form state")
 replace_once(organizer,
     "    val bannerPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->",
