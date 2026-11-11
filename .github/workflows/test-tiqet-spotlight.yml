@@ -1,0 +1,52 @@
+name: Test Tiqet Spotlight and organizer banners
+
+on:
+  push:
+    branches: [tiqet-spotlight-discovery]
+    paths:
+      - 'supabase/migrations/*tiqet_spotlight*'
+      - 'supabase/migrations/*organizer_event_banners*'
+      - 'supabase/tests/tiqet_spotlight_*'
+      - '.github/workflows/test-tiqet-spotlight.yml'
+  pull_request:
+    paths:
+      - 'supabase/migrations/*tiqet_spotlight*'
+      - 'supabase/migrations/*organizer_event_banners*'
+      - 'supabase/tests/tiqet_spotlight_*'
+
+permissions:
+  contents: read
+
+jobs:
+  postgres:
+    name: PostgreSQL 17 Spotlight and organizer-artwork lifecycle
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tiqet_spotlight_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tiqet_spotlight_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: tiqet_spotlight_test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap disposable Tiqet schema
+        run: psql -v ON_ERROR_STOP=1 -f supabase/tests/tiqet_spotlight_bootstrap.sql
+      - name: Apply Spotlight migration
+        run: psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261111103000_tiqet_spotlight_events.sql
+      - name: Apply organizer-owned banner migration
+        run: psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261111110000_tiqet_organizer_event_banners.sql
+      - name: Test Spotlight, organizer ownership and event artwork
+        run: psql -v ON_ERROR_STOP=1 -f supabase/tests/tiqet_spotlight_events.test.sql
