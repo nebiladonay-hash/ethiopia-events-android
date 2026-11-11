@@ -13,6 +13,7 @@ on:
       - 'patches/v7-2-payment-methods-api.patch'
       - 'scripts/apply-tiqet-spotlight.py'
       - 'scripts/add-organizer-category-shortcuts.py'
+      - 'scripts/remove-platform-revenue-from-organizer.py'
       - 'supabase/migrations/20261111103000_tiqet_spotlight_events.sql'
       - 'supabase/migrations/20261111110000_tiqet_organizer_event_banners.sql'
       - 'supabase/tests/tiqet_spotlight_*'
@@ -198,6 +199,10 @@ jobs:
           set -euo pipefail
           python3 "$GITHUB_WORKSPACE/scripts/apply-tiqet-spotlight.py" "$PROJECT_DIR"
           python3 "$GITHUB_WORKSPACE/scripts/add-organizer-category-shortcuts.py" "$PROJECT_DIR"
+          python3 "$GITHUB_WORKSPACE/scripts/remove-platform-revenue-from-organizer.py" "$PROJECT_DIR"
+          ! grep -q 'TIQET PLATFORM REVENUE' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
+          ! grep -q 'fetchPlatformRevenueSummary' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
+          ! grep -q 'withdrawPlatformRevenue' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
           grep -q 'Boxing Matches' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
           grep -q 'Tiqet Spotlight' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
           grep -q 'Icons.Outlined.Explore' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
