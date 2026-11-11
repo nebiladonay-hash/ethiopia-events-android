@@ -6,6 +6,7 @@ on:
     branches:
       - tiqet-control-v1
       - tiqet-control-refunds
+      - tiqet-control-spotlight
     paths:
       - 'tiqet-control-android/**'
       - '.github/workflows/build-tiqet-control.yml'

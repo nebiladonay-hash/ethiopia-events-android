@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -32,9 +33,12 @@ import androidx.compose.ui.unit.sp
 import et.tiqet.control.data.ApiException
 import et.tiqet.control.data.ControlSession
 import et.tiqet.control.data.SupabaseApi
+import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.Duration
+import java.time.Instant
 import java.util.Locale
 
 private val Ink = Color(0xFF152C2A)
@@ -185,7 +189,7 @@ private fun LoginScreen(
                                 api.getOverview(newSession)
                                 onSignedIn(newSession)
                             } catch (e: Exception) {
-                                error = e.message ?: "Sign-in failed."
+                                error = api.userFacingError(e, "Sign-in failed.")
                             } finally {
                                 busy = false
                             }
@@ -232,13 +236,13 @@ private fun ControlWorkspace(
 ) {
     var overview by remember { mutableStateOf(JSONObject()) }
     var organisers by remember { mutableStateOf(JSONArray()) }
-    var verifiedOrganisers by remember { mutableStateOf(JSONArray()) }
-    var events by remember { mutableStateOf(JSONArray()) }
     var publishedEvents by remember { mutableStateOf(JSONArray()) }
+    var spotlightEvents by remember { mutableStateOf(JSONArray()) }
     var staff by remember { mutableStateOf(JSONArray()) }
     var audit by remember { mutableStateOf(JSONArray()) }
     var finance by remember { mutableStateOf(JSONObject()) }
     var refundsDashboard by remember { mutableStateOf(JSONObject()) }
+    var platformRevenue by remember { mutableStateOf(JSONObject()) }
     var payoutDestinations by remember { mutableStateOf(JSONArray()) }
     var selectedTab by remember { mutableStateOf(ControlTab.OVERVIEW) }
     var busy by remember { mutableStateOf(false) }
@@ -255,20 +259,34 @@ private fun ControlWorkspace(
             error = null
             try {
                 overview = api.getOverview(session)
-                events = api.getPendingEvents(session)
                 if (overview.optBoolean("admin_access")) {
                     publishedEvents = api.getPublishedEventsForReview(session)
+                    spotlightEvents = try { api.getSpotlightEvents(session) } catch (_: Exception) { JSONArray() }
                     organisers = api.getOrganisers(session)
-                    verifiedOrganisers = api.getVerifiedOrganisers(session)
                     audit = api.getAuditLog(session)
                     finance = api.getFinanceDashboard(session)
                     refundsDashboard = api.getRefundsDashboard(session)
+                    if (session.isPlatformOwner) {
+                        platformRevenue = try {
+                            api.getPlatformRevenueSummary(session)
+                        } catch (e: Exception) {
+                            JSONObject().put("load_error", e.message ?: "Could not load TIQET platform revenue.")
+                        }
+                        payoutDestinations = try {
+                            api.getChapaPayoutDestinations(session)
+                        } catch (_: Exception) {
+                            JSONArray()
+                        }
+                    } else {
+                        platformRevenue = JSONObject()
+                        payoutDestinations = JSONArray()
+                    }
                 }
                 if (overview.optBoolean("super_admin_access")) {
                     staff = api.getStaffDirectory(session)
                 }
             } catch (e: Exception) {
-                error = e.message ?: "Unable to load Control data."
+                error = api.userFacingError(e, "Unable to load Control data.")
             } finally {
                 busy = false
             }
@@ -364,7 +382,6 @@ private fun ControlWorkspace(
                 )
                 ControlTab.ORGANISERS -> OrganiserQueueScreen(
                     items = organisers,
-                    verifiedItems = verifiedOrganisers,
                     busy = busy,
                     onReview = { id, decision, notes ->
                         scope.launch {
@@ -372,42 +389,20 @@ private fun ControlWorkspace(
                             try {
                                 api.reviewOrganiser(session, id, decision, notes)
                                 notice = when (decision) {
-                                    "approve" -> "Organiser approved. You can now choose whether to trust them for automatic publishing."
+                                    "approve" -> "Organiser account approved. Event publishing is immediate; paid-ticket settlement is managed separately."
                                     "reject" -> "Organiser application rejected."
                                     else -> "Information request recorded."
                                 }
                                 refresh()
-                            } catch (e: Exception) { error = e.message ?: "Could not review organiser." }
-                            finally { busy = false }
-                        }
-                    },
-                    onAutoPublish = { id, enabled, reason ->
-                        scope.launch {
-                            busy = true
-                            try {
-                                api.setOrganiserAutoPublish(session,id,enabled,reason)
-                                notice = if(enabled) "Trusted organiser auto-publishing enabled." else "Automatic publishing disabled; future events return to review."
-                                refresh()
-                            } catch (e: Exception) { error = e.message ?: "Could not update organiser publishing policy." }
+                            } catch (e: Exception) { error = api.userFacingError(e, "Could not review organiser.") }
                             finally { busy = false }
                         }
                     }
                 )
                 ControlTab.EVENTS -> EventQueueScreen(
-                    items = events,
                     publishedItems = publishedEvents,
+                    spotlightItems = spotlightEvents,
                     busy = busy,
-                    onReview = { id, decision, notes ->
-                        scope.launch {
-                            busy = true
-                            try {
-                                api.reviewEvent(session, id, decision, notes)
-                                notice = if (decision == "approve") "Event approved and published." else "Event returned to the organiser for changes."
-                                refresh()
-                            } catch (e: Exception) { error = e.message ?: "Could not review event." }
-                            finally { busy = false }
-                        }
-                    },
                     onFlagPublished = { id, reason ->
                         scope.launch {
                             busy = true
@@ -415,8 +410,21 @@ private fun ControlWorkspace(
                                 api.flagPublishedEvent(session,id,reason)
                                 notice = "Published event removed from public listings and sent to moderator review."
                                 refresh()
-                            } catch (e: Exception) { error = e.message ?: "Could not flag event." }
+                            } catch (e: Exception) { error = api.userFacingError(e, "Could not flag event.") }
                             finally { busy = false }
+                        }
+                    },
+                    onSetSpotlight = { id, featured, sortOrder, endsAt, label ->
+                        scope.launch {
+                            busy = true
+                            try {
+                                api.setEventSpotlight(session, id, featured, sortOrder, endsAt, label)
+                                notice = if (featured) "Tiqet Spotlight settings saved. The organizer-owned banner remains unchanged."
+                                    else "Event removed from Tiqet Spotlight. Its organizer-owned banner remains unchanged."
+                                refresh()
+                            } catch (e: Exception) {
+                                error = api.userFacingError(e, "Could not update Tiqet Spotlight.")
+                            } finally { busy = false }
                         }
                     }
                 )
@@ -432,6 +440,7 @@ private fun ControlWorkspace(
                 ControlTab.FINANCE -> FinanceScreen(
                     finance = finance,
                     refundsDashboard = refundsDashboard,
+                    platformRevenue = platformRevenue,
                     busy = busy,
                     isPlatformOwner = session.isPlatformOwner,
                     payoutDestinations = payoutDestinations,
@@ -440,7 +449,7 @@ private fun ControlWorkspace(
                             try {
                                 payoutDestinations = api.getChapaPayoutDestinations(session)
                             } catch (e: Exception) {
-                                error = e.message ?: "Could not load Chapa payout destinations."
+                                error = api.userFacingError(e, "Could not load Chapa payout destinations.")
                             }
                         }
                     },
@@ -452,11 +461,19 @@ private fun ControlWorkspace(
                                 val result = api.createPlatformPayout(
                                     session, amountMinor, bankSlug, bankName, accountName, accountNumber
                                 )
-                                notice = "Platform withdrawal recorded with Chapa status ${result.optString("status", "pending")}. It remains under reconciliation until final confirmation."
+                                notice = "TIQET platform withdrawal recorded with Chapa status ${result.optString("status", "pending")}. It remains under reconciliation until final confirmation."
                                 finance = api.getFinanceDashboard(session)
+                                platformRevenue = try {
+                                    api.getPlatformRevenueSummary(session)
+                                } catch (refreshError: Exception) {
+                                    JSONObject().put("load_error", refreshError.message ?: "Revenue summary refresh failed.")
+                                }
                             } catch (e: Exception) {
-                                error = e.message ?: "Could not submit the platform withdrawal."
-                                try { finance = api.getFinanceDashboard(session) } catch (_: Exception) { }
+                                error = api.userFacingError(e, "Could not submit the platform withdrawal.")
+                                try {
+                                    finance = api.getFinanceDashboard(session)
+                                    platformRevenue = api.getPlatformRevenueSummary(session)
+                                } catch (_: Exception) { }
                             } finally {
                                 busy = false
                             }
@@ -474,7 +491,7 @@ private fun ControlWorkspace(
                                 finance = api.getFinanceDashboard(session)
                                 audit = api.getAuditLog(session)
                             } catch (e: Exception) {
-                                error = e.message ?: "Could not update organiser payout request."
+                                error = api.userFacingError(e, "Could not update organiser payout request.")
                                 try {
                                     finance = api.getFinanceDashboard(session)
                                     audit = api.getAuditLog(session)
@@ -494,7 +511,7 @@ private fun ControlWorkspace(
                                 finance = api.getFinanceDashboard(session)
                                 refundsDashboard = api.getRefundsDashboard(session)
                             } catch (e: Exception) {
-                                error = e.message ?: "Could not create the Chapa refund request."
+                                error = api.userFacingError(e, "Could not create the Chapa refund request.")
                                 // A timeout can still leave a saved submission_unknown operation.
                                 // Refresh so the operator can safely retry the same idempotency key.
                                 try {
@@ -517,7 +534,7 @@ private fun ControlWorkspace(
                                 finance = api.getFinanceDashboard(session)
                                 refundsDashboard = api.getRefundsDashboard(session)
                             } catch (e: Exception) {
-                                error = e.message ?: "Could not verify the Chapa refund."
+                                error = api.userFacingError(e, "Could not verify the Chapa refund.")
                                 // Keep pending/unknown verification states visible after provider outages.
                                 try {
                                     finance = api.getFinanceDashboard(session)
@@ -565,7 +582,7 @@ private fun OverviewScreen(
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MetricCard("EVENT REVIEWS", overview.optInt("pending_events"), Accent, Modifier.weight(1f))
+                MetricCard("LIVE EVENTS", overview.optInt("published_events"), Accent, Modifier.weight(1f))
                 if (isAdmin) MetricCard("ORGANISERS", overview.optInt("pending_organisers"), Teal, Modifier.weight(1f))
             }
         }
@@ -582,11 +599,11 @@ private fun OverviewScreen(
                 Text("OPERATIONS", color=Color(0xFFA9C4BC), fontSize=9.sp, fontWeight=FontWeight.Bold, letterSpacing=1.4.sp)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    if (isSuperAdmin) "You have full platform control." else if (isAdmin) "You can verify organisers and manage reviews." else "You can review submitted events.",
+                    if (isSuperAdmin) "You have full platform control." else if (isAdmin) "You can manage organisers, live listings and platform finance." else "You can monitor live listings and reported events.",
                     color=Color.White, fontSize=17.sp, fontWeight=FontWeight.SemiBold
                 )
                 Spacer(Modifier.height(5.dp))
-                Text("Every approval and staff permission change is recorded in the audit log.", color=Color(0xFFC5D5D0), fontSize=11.sp, lineHeight=16.sp)
+                Text("Organiser access and staff permission changes are recorded in the audit log.", color=Color(0xFFC5D5D0), fontSize=11.sp, lineHeight=16.sp)
             }
         }
         item {
@@ -594,8 +611,8 @@ private fun OverviewScreen(
         }
         item {
             QueueShortcut(
-                title = "Event submissions",
-                subtitle = "${overview.optInt("pending_events")} waiting for review",
+                title = "Live event listings",
+                subtitle = "${overview.optInt("published_events")} public events",
                 onClick = { onOpenTab(ControlTab.EVENTS) }
             )
         }
@@ -678,16 +695,10 @@ private fun QueueShortcut(title: String, subtitle: String, onClick: () -> Unit) 
 @Composable
 private fun OrganiserQueueScreen(
     items: JSONArray,
-    verifiedItems: JSONArray,
     busy: Boolean,
-    onReview: (String, String, String) -> Unit,
-    onAutoPublish: (String, Boolean, String) -> Unit
+    onReview: (String, String, String) -> Unit
 ) {
     var notes by remember { mutableStateOf("") }
-    var policyReason by remember { mutableStateOf("") }
-    var selectedOrg by remember { mutableStateOf<JSONObject?>(null) }
-    var selectedTrustEnabled by remember { mutableStateOf(false) }
-    var showTrustConfirm by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier=Modifier.fillMaxSize().padding(horizontal=16.dp),
@@ -697,7 +708,7 @@ private fun OrganiserQueueScreen(
         item {
             ScreenHeading(
                 "Organiser applications",
-                "Verify organisers first. Trusted organisers can publish ordinary events without waiting for each event review."
+                "Organiser verification is separate from event publishing. New events go live immediately; verified settlement details are needed for paid tickets and payouts."
             )
         }
         item {
@@ -731,107 +742,51 @@ private fun OrganiserQueueScreen(
                 )
             }
         }
-        item {
-            Spacer(Modifier.height(8.dp))
-            Text("VERIFIED ORGANISERS · ${verifiedItems.length()}",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
-            Text(
-                "Auto-publishing is an explicit trust decision. Only verified organisers can receive it; flagged or rejected events still require human review.",
-                color=Muted,fontSize=10.sp,lineHeight=15.sp
-            )
-        }
-        if(verifiedItems.length()==0) {
-            item { EmptyState("No verified organisers yet","Approved organisers will appear here for trust management.") }
-        } else {
-            items((0 until verifiedItems.length()).mapNotNull{verifiedItems.optJSONObject(it)},key={"trusted-${it.optString("id")}"}) { org ->
-                val trusted=org.optBoolean("auto_publish_enabled")
-                Column(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(CardWhite).padding(14.dp)
-                ) {
-                    Row(verticalAlignment=Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(org.optString("name","Organiser"),color=Ink,fontSize=13.sp,fontWeight=FontWeight.Bold)
-                            Text(org.optString("legal_name"),color=Muted,fontSize=10.sp)
-                            Text(org.optString("contact_phone"),color=Muted,fontSize=9.sp)
-                        }
-                        StatusPill(if(trusted) "auto publish" else "manual review")
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        if(trusted)
-                            "New events from this organiser publish automatically after submission, unless a review flag is active."
-                        else
-                            "New events from this organiser enter the normal manual review queue.",
-                        color=Muted,fontSize=10.sp,lineHeight=15.sp
-                    )
-                    Spacer(Modifier.height(7.dp))
-                    OutlinedButton(
-                        onClick={
-                            selectedOrg=org
-                            selectedTrustEnabled=!trusted
-                            showTrustConfirm=true
-                        },
-                        enabled=!busy,
-                        modifier=Modifier.fillMaxWidth(),
-                        shape=RoundedCornerShape(11.dp)
-                    ) {
-                        Text(if(trusted) "Turn off automatic publishing" else "Trust organiser · enable auto-publish")
-                    }
-                }
-            }
-        }
-    }
 
-    val org=selectedOrg
-    if(showTrustConfirm && org!=null) {
-        AlertDialog(
-            onDismissRequest={showTrustConfirm=false},
-            title={Text(if(selectedTrustEnabled) "Trust this organiser?" else "Return organiser to manual review?")},
-            text={
-                Column {
-                    Text(
-                        if(selectedTrustEnabled)
-                            "New unflagged events from ${org.optString("name")} will publish automatically. Event flags and unresolved rejections continue to require review."
-                        else
-                            "New events from ${org.optString("name")} will require moderator approval again.",
-                        fontSize=12.sp,lineHeight=17.sp
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value=policyReason,onValueChange={policyReason=it},
-                        modifier=Modifier.fillMaxWidth(),
-                        label={Text("Reason (required)")},
-                        minLines=2,maxLines=4,shape=RoundedCornerShape(12.dp)
-                    )
-                }
-            },
-            confirmButton={
-                Button(
-                    onClick={
-                        showTrustConfirm=false
-                        onAutoPublish(org.optString("id"),selectedTrustEnabled,policyReason.trim())
-                        policyReason=""
-                    },
-                    enabled=policyReason.trim().length in 5..500,
-                    colors=ButtonDefaults.buttonColors(containerColor=if(selectedTrustEnabled) Teal else Danger)
-                ) { Text(if(selectedTrustEnabled) "Trust organiser" else "Disable auto-publish") }
-            },
-            dismissButton={TextButton(onClick={showTrustConfirm=false}) { Text("Cancel") }}
-        )
     }
 }
 
 @Composable
 private fun EventQueueScreen(
-    items: JSONArray,
     publishedItems: JSONArray,
+    spotlightItems: JSONArray,
     busy: Boolean,
-    onReview: (String, String, String) -> Unit,
-    onFlagPublished: (String,String) -> Unit
+    onFlagPublished: (String,String) -> Unit,
+    onSetSpotlight: (String, Boolean, Int, String?, String) -> Unit
 ) {
-    var notes by remember { mutableStateOf("") }
     var flagReason by remember { mutableStateOf("") }
     var selectedPublishedEvent by remember { mutableStateOf<JSONObject?>(null) }
     var showFlagConfirm by remember { mutableStateOf(false) }
+    var selectedSpotlightEvent by remember { mutableStateOf<JSONObject?>(null) }
+    var showSpotlightDialog by remember { mutableStateOf(false) }
+    var spotlightSortOrder by remember { mutableStateOf("100") }
+    var spotlightLabel by remember { mutableStateOf("Tiqet Spotlight") }
+    var spotlightExpiryDays by remember { mutableStateOf(7) }
+    var spotlightOriginalEndsAt by remember { mutableStateOf<String?>(null) }
+    var spotlightExpiryChanged by remember { mutableStateOf(false) }
+    var spotlightExpiryExpanded by remember { mutableStateOf(false) }
+    val spotlightById = remember(spotlightItems) {
+        (0 until spotlightItems.length())
+            .mapNotNull { spotlightItems.optJSONObject(it) }
+            .filter { it.optString("id").isNotBlank() }
+            .associateBy { it.optString("id") }
+    }
+
+    fun openSpotlightSettings(event: JSONObject) {
+        val existing = spotlightById[event.optString("id")]
+        selectedSpotlightEvent = event
+        spotlightSortOrder = existing?.optInt("spotlight_sort_order", 100)?.toString() ?: "100"
+        spotlightLabel = existing?.optString("featured_label")?.takeIf { !it.isNullOrBlank() } ?: "Tiqet Spotlight"
+        spotlightOriginalEndsAt = existing?.optString("spotlight_ends_at")?.takeIf { it.isNotBlank() }
+        spotlightExpiryDays = if (existing == null) {
+            7
+        } else {
+            spotlightExpiryPreset(spotlightOriginalEndsAt)
+        }
+        spotlightExpiryChanged = false
+        spotlightExpiryExpanded = false
+        showSpotlightDialog = true
+    }
 
     LazyColumn(
         modifier=Modifier.fillMaxSize().padding(horizontal=16.dp),
@@ -839,56 +794,89 @@ private fun EventQueueScreen(
         contentPadding=PaddingValues(bottom=28.dp)
     ) {
         item {
-            ScreenHeading("Event moderation","Review new submissions and investigate published listings reported or flagged for review.")
-        }
-        item {
-            OutlinedTextField(
-                value=notes,onValueChange={notes=it},
-                modifier=Modifier.fillMaxWidth(),
-                label={Text("Review note (optional)")},
-                shape=RoundedCornerShape(13.dp),minLines=1,maxLines=3
-            )
-        }
-        item {
-            Text("PENDING SUBMISSIONS · ${items.length()}",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
-        }
-        if(items.length()==0) {
-            item { EmptyState("No pending event submissions","New events from manual-review organisers appear here.") }
-        } else {
-            items((0 until items.length()).mapNotNull{items.optJSONObject(it)},key={it.optString("id")}) { event ->
-                ReviewCard(
-                    title=event.optString("title","Untitled event"),
-                    subtitle=event.optString("category"),
-                    meta=listOf(event.optString("starts_at").replace("T"," ").take(16),event.optString("venue_name"),event.optString("city"))
-                        .filter{it.isNotBlank()}.joinToString(" · "),
-                    note=event.optString("description"),
-                    busy=busy,
-                    actions=listOf(
-                        ReviewAction("Request changes","request_changes",Muted),
-                        ReviewAction("Reject","reject",Danger),
-                        ReviewAction("Approve & publish","approve",Teal)
-                    ),
-                    onAction={decision->onReview(event.optString("id"),decision,notes.trim())}
-                )
-            }
+            ScreenHeading("Live event listings","Browse published events, curate Tiqet Spotlight and unlist reported events when necessary.")
         }
         item {
             Spacer(Modifier.height(8.dp))
-            Text("PUBLISHED EVENTS · ${publishedItems.length()}",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
-            Text("Flagging removes a published event from public listings and sends it back to the review queue.",color=Muted,fontSize=10.sp,lineHeight=15.sp)
+            Text("LIVE EVENTS · ${publishedItems.length()}",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
+            Text("Events publish immediately. You can still unlist a reported event after publication.",color=Muted,fontSize=10.sp,lineHeight=15.sp)
         }
         if(publishedItems.length()==0) {
-            item { EmptyState("No published events","Published events will appear here for ongoing moderation.") }
+            item { EmptyState("No live events yet","New organiser events will appear here as soon as they are published.") }
         } else {
             items((0 until publishedItems.length()).mapNotNull{publishedItems.optJSONObject(it)},key={"published-${it.optString("id")}"}) { event ->
+                val eventId = event.optString("id")
+                val activeSpotlight = spotlightById[eventId]
+                val isFeatured = activeSpotlight != null
+                val eventBanner = event.optString("image_url")
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(CardWhite).padding(14.dp)) {
                     Text(event.optString("title","Untitled event"),color=Ink,fontSize=13.sp,fontWeight=FontWeight.Bold)
+                    if (eventBanner.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        AsyncImage(
+                            model = eventBanner,
+                            contentDescription = "Organizer-provided banner for ${event.optString("title")}",
+                            modifier = Modifier.fillMaxWidth().height(132.dp).clip(RoundedCornerShape(12.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Spacer(Modifier.height(6.dp))
+                        Text("No organizer banner uploaded",color=Muted,fontSize=10.sp)
+                    }
+                    Spacer(Modifier.height(5.dp))
                     Text("${event.optString("organisation_name")} · ${event.optString("category")}",color=Teal,fontSize=10.sp)
                     Text(listOf(event.optString("starts_at").replace("T"," ").take(16),event.optString("venue_name"),event.optString("city"))
                         .filter{it.isNotBlank()}.joinToString(" · "),color=Muted,fontSize=9.sp)
                     if(event.optString("description").isNotBlank()) {
                         Text(event.optString("description"),color=Ink,fontSize=11.sp,lineHeight=15.sp,maxLines=3,overflow=TextOverflow.Ellipsis)
                     }
+                    if (isFeatured && activeSpotlight != null) {
+                        Spacer(Modifier.height(7.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            StatusPill("Spotlight")
+                            Spacer(Modifier.width(8.dp))
+                            Text("Curated placement is active", color = Teal, fontSize = 10.sp)
+                        }
+                        val expiry = activeSpotlight.optString("spotlight_ends_at")
+                        Text(
+                            "Priority ${activeSpotlight.optInt("spotlight_sort_order", 100)} · " +
+                                if (expiry.isBlank()) "No automatic expiry" else "Ends ${expiry.replace("T", " ").take(16)} UTC",
+                            color = Muted,
+                            fontSize = 9.sp
+                        )
+                    }
+                    Spacer(Modifier.height(7.dp))
+                    if (isFeatured) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(7.dp), modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(
+                                onClick = { openSpotlightSettings(event) },
+                                enabled = !busy,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(11.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Teal)
+                            ) { Text("Edit Spotlight", fontSize = 10.sp) }
+                            OutlinedButton(
+                                onClick = { onSetSpotlight(eventId, false, 100, null, "Tiqet Spotlight") },
+                                enabled = !busy,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(11.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger)
+                            ) { Text("Remove", fontSize = 10.sp) }
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { openSpotlightSettings(event) },
+                            enabled = !busy && eventBanner.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(11.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Teal)
+                        ) { Text("Feature in Tiqet Spotlight", fontSize = 10.sp) }
+                        if (eventBanner.isBlank()) {
+                            Text("The organizer must upload a banner before this event can be featured.", color = Muted, fontSize = 9.sp)
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text("The organizer owns this artwork. Tiqet only controls the Spotlight placement, label and expiry.", color = Muted, fontSize = 9.sp, lineHeight = 13.sp)
                     Spacer(Modifier.height(7.dp))
                     OutlinedButton(
                         onClick={selectedPublishedEvent=event;showFlagConfirm=true},
@@ -900,6 +888,133 @@ private fun EventQueueScreen(
                 }
             }
         }
+    }
+
+    val configuredSpotlightEvent = selectedSpotlightEvent
+    if (showSpotlightDialog && configuredSpotlightEvent != null) {
+        val currentSpotlight = spotlightById[configuredSpotlightEvent.optString("id")]
+        val sortOrderValue = spotlightSortOrder.toIntOrNull()
+        val bannerUrl = configuredSpotlightEvent.optString("image_url")
+        AlertDialog(
+            onDismissRequest = { showSpotlightDialog = false },
+            title = { Text(if (currentSpotlight != null) "Edit Tiqet Spotlight" else "Feature in Tiqet Spotlight") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 430.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(9.dp)
+                ) {
+                    Text(
+                        "Set how this event appears in the curated section. The organizer's banner is previewed below and is never replaced by TIQET.",
+                        color = Muted,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp
+                    )
+                    if (bannerUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = bannerUrl,
+                            contentDescription = "Organizer-provided Spotlight banner",
+                            modifier = Modifier.fillMaxWidth().height(145.dp).clip(RoundedCornerShape(12.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                    Text(
+                        configuredSpotlightEvent.optString("title", "Untitled event"),
+                        color = Ink,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    OutlinedTextField(
+                        value = spotlightLabel,
+                        onValueChange = { spotlightLabel = it.take(40) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Spotlight label") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    OutlinedTextField(
+                        value = spotlightSortOrder,
+                        onValueChange = { spotlightSortOrder = it.filter(Char::isDigit).take(5) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Priority / order (0–10000)") },
+                        supportingText = { Text("Lower numbers appear earlier in Spotlight.") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    Text("AUTOMATIC EXPIRY", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text(
+                        when {
+                            currentSpotlight != null && !spotlightExpiryChanged && spotlightOriginalEndsAt == null ->
+                                "Current setting: no automatic expiry. It will stay that way unless you change it."
+                            currentSpotlight != null && !spotlightExpiryChanged ->
+                                "Current end: ${spotlightOriginalEndsAt?.replace("T", " ")?.take(16)} UTC. Leave this setting unchanged to preserve the exact time."
+                            else -> "The selected duration starts when you save these settings."
+                        },
+                        color = Muted,
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp
+                    )
+                    Box {
+                        OutlinedButton(
+                            onClick = { spotlightExpiryExpanded = true },
+                            shape = RoundedCornerShape(11.dp)
+                        ) {
+                            Text(if (spotlightExpiryDays == 0) "No automatic expiry" else "After ${spotlightExpiryDays} days")
+                        }
+                        DropdownMenu(
+                            expanded = spotlightExpiryExpanded,
+                            onDismissRequest = { spotlightExpiryExpanded = false }
+                        ) {
+                            listOf(1, 3, 7, 14, 30).forEach { days ->
+                                DropdownMenuItem(
+                                    text = { Text("${days} days") },
+                                    onClick = {
+                                        spotlightExpiryDays = days
+                                        spotlightExpiryChanged = true
+                                        spotlightExpiryExpanded = false
+                                    }
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text("No automatic expiry") },
+                                onClick = {
+                                    spotlightExpiryDays = 0
+                                    spotlightExpiryChanged = true
+                                    spotlightExpiryExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !busy && sortOrderValue != null && sortOrderValue in 0..10000 &&
+                        spotlightLabel.trim().isNotEmpty() && bannerUrl.isNotBlank(),
+                    onClick = {
+                        val endsAt = if (!spotlightExpiryChanged && currentSpotlight != null) {
+                            spotlightOriginalEndsAt
+                        } else if (spotlightExpiryDays == 0) {
+                            null
+                        } else {
+                            Instant.now().plusSeconds(spotlightExpiryDays.toLong() * 24L * 60L * 60L).toString()
+                        }
+                        showSpotlightDialog = false
+                        onSetSpotlight(
+                            configuredSpotlightEvent.optString("id"),
+                            true,
+                            sortOrderValue!!,
+                            endsAt,
+                            spotlightLabel.trim()
+                        )
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Teal)
+                ) { Text("Save Spotlight") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSpotlightDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 
     val flaggedEvent=selectedPublishedEvent
@@ -933,6 +1048,13 @@ private fun EventQueueScreen(
             dismissButton={TextButton(onClick={showFlagConfirm=false}) { Text("Cancel") }}
         )
     }
+}
+
+private fun spotlightExpiryPreset(endsAt: String?): Int {
+    if (endsAt.isNullOrBlank()) return 0
+    val end = runCatching { Instant.parse(endsAt) }.getOrNull() ?: return 7
+    val hoursRemaining = Duration.between(Instant.now(), end).toHours()
+    return listOf(1, 3, 7, 14, 30).minByOrNull { kotlin.math.abs(it.toLong() * 24L - hoursRemaining) } ?: 7
 }
 
 private data class ReviewAction(val label: String, val decision: String, val color: Color)
@@ -1261,6 +1383,7 @@ private fun UserModerationScreen(
 private fun FinanceScreen(
     finance: JSONObject,
     refundsDashboard: JSONObject,
+    platformRevenue: JSONObject,
     busy: Boolean,
     isPlatformOwner: Boolean,
     payoutDestinations: JSONArray,
@@ -1302,6 +1425,16 @@ private fun FinanceScreen(
     fun amount(row: JSONObject, key: String = "amount_minor"): String =
         money(row.optLong(key).toDouble() / 100.0)
 
+    fun openPlatformWithdrawal() {
+        payoutAmountEtb = ""
+        payoutAccountName = ""
+        payoutAccountNumber = ""
+        selectedDestinationSlug = ""
+        payoutFormError = null
+        showPayoutDialog = true
+        onLoadPayoutDestinations()
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start=16.dp,end=16.dp,top=15.dp,bottom=28.dp),
@@ -1317,6 +1450,56 @@ private fun FinanceScreen(
                 if (busy) {
                     Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(Modifier.fillMaxWidth(),color=Teal)
+                }
+            }
+        }
+        if (isPlatformOwner) {
+            item {
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(CardWhite).padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("TIQET PLATFORM REVENUE",color=Teal,fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.2.sp)
+                    if (platformRevenue.optBoolean("is_owner")) {
+                        Text(
+                            money(platformRevenue.optDouble("ledger_available_etb")),
+                            color=Ink,
+                            fontSize=27.sp,
+                            fontWeight=FontWeight.Bold
+                        )
+                        Text(
+                            "Ledger amount available before payment fees, taxes, refunds, disputes and operating costs.",
+                            color=Muted,fontSize=10.sp,lineHeight=14.sp
+                        )
+                        Text("Gross Tiqet revenue: ${money(platformRevenue.optDouble("gross_platform_revenue_etb"))}",color=Ink,fontSize=11.sp)
+                        Text("Successfully withdrawn: ${money(platformRevenue.optDouble("total_successful_withdrawals_etb"))}",color=Muted,fontSize=11.sp)
+                        Text("Successful payout fees: ${money(platformRevenue.optDouble("successful_payout_fees_etb"))}",color=Muted,fontSize=11.sp)
+                        val activeDestinations = (0 until payoutDestinations.length()).mapNotNull { i ->
+                            payoutDestinations.optJSONObject(i)?.let { "${it.optString("name")} (${it.optString("slug")})" }
+                        }.joinToString(" · ")
+                        Text(
+                            "Active payout destinations: " + activeDestinations.ifBlank { "Not available" },
+                            color=Muted,fontSize=10.sp,lineHeight=14.sp
+                        )
+                        if (platformRevenue.optString("note").isNotBlank()) {
+                            Text(platformRevenue.optString("note"),color=Muted,fontSize=9.sp,lineHeight=13.sp)
+                        }
+                    } else {
+                        Text(
+                            platformRevenue.optString("load_error").ifBlank { "TIQET platform revenue summary is not available." },
+                            color=Danger,fontSize=11.sp,lineHeight=15.sp
+                        )
+                    }
+                    Text(
+                        "This balance belongs to TIQET. Organisers' ticket earnings and settlement balances are separate.",
+                        color=Teal,fontSize=10.sp,lineHeight=14.sp,fontWeight=FontWeight.SemiBold
+                    )
+                    Button(
+                        onClick = { openPlatformWithdrawal() },
+                        enabled = !busy && platformRevenue.optBoolean("is_owner"),
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor=Ink)
+                    ) { Text("Withdraw TIQET revenue") }
                 }
             }
         }
@@ -1445,23 +1628,7 @@ private fun FinanceScreen(
             Row(verticalAlignment=Alignment.CenterVertically) {
                 Text("Platform withdrawals",color=Ink,fontSize=13.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
                 Text(platformPayouts.length().toString(),color=Muted,fontSize=10.sp)
-                if (isPlatformOwner) {
-                    Spacer(Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            payoutAmountEtb = ""
-                            payoutAccountName = ""
-                            payoutAccountNumber = ""
-                            selectedDestinationSlug = ""
-                            payoutFormError = null
-                            showPayoutDialog = true
-                            onLoadPayoutDestinations()
-                        },
-                        enabled = !busy,
-                        contentPadding = PaddingValues(horizontal=10.dp, vertical=6.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor=Ink)
-                    ) { Text("Withdraw",fontSize=10.sp) }
-                }
+                
             }
         }
         if (isPlatformOwner) {

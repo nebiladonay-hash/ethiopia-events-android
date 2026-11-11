@@ -7,6 +7,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.UnknownHostException
+import java.net.SocketTimeoutException
+import java.net.ConnectException
+import javax.net.ssl.SSLException
+import java.util.Locale
 
 data class ControlSession(
     val accessToken: String,
@@ -22,6 +27,41 @@ class SupabaseApi(
 ) {
     val isConfigured: Boolean
         get() = projectUrl.startsWith("https://") && publishableKey.isNotBlank()
+
+    fun userFacingError(error: Throwable, fallback: String): String {
+        val apiError = error as? ApiException
+        val message = (apiError?.message ?: error.message.orEmpty()).lowercase(Locale.US)
+        val status = apiError?.statusCode
+        return when {
+            error is UnknownHostException || error is ConnectException ||
+                message.contains("unknownhostexception") || message.contains("unable to resolve host") ->
+                "Couldn't connect to Tiqet. Check your internet connection and try again."
+            error is SocketTimeoutException || message.contains("sockettimeoutexception") ||
+                message.contains("timed out") ->
+                "Tiqet is taking too long to respond. Check your connection and try again."
+            error is SSLException || message.contains("sslhandshake") || message.contains("certpath") ->
+                "A secure connection couldn't be made. Check your phone's date and time, then try again."
+            message.contains("invalid login credentials") || message.contains("invalid_credentials") ->
+                "That email and password don't match. Check them and try again."
+            message.contains("email not confirmed") ->
+                "Please confirm your email before signing in."
+            status == 401 ->
+                "Your session has expired. Sign in again to continue."
+            status == 403 ->
+                "This account doesn't have permission to do that."
+            status == 404 ->
+                "This Control feature is temporarily unavailable. Please try again shortly."
+            status == 409 ->
+                "This request has already been processed or needs a quick check. Refresh and try again."
+            status == 429 ->
+                "Too many attempts. Wait a moment, then try again."
+            status != null && status >= 500 ->
+                "Tiqet is temporarily unavailable. Please try again shortly."
+            apiError != null && status == null ->
+                apiError.message?.takeIf { it.isNotBlank() } ?: fallback
+            else -> fallback
+        }
+    }
 
     suspend fun signIn(email: String, password: String): ControlSession = withContext(Dispatchers.IO) {
         val json = request(
@@ -45,28 +85,6 @@ class SupabaseApi(
     suspend fun getOrganisers(session: ControlSession): JSONArray =
         getArray(session, "/rest/v1/organisations?select=id,name,legal_name,contact_phone,status,verification_notes,created_at&status=eq.pending&order=created_at.asc")
 
-    suspend fun getVerifiedOrganisers(session: ControlSession): JSONArray {
-        val result = rpc(session, "get_tiqet_verified_organisers", JSONObject())
-        return result.optJSONArray("organisers") ?: JSONArray()
-    }
-
-    suspend fun setOrganiserAutoPublish(
-        session: ControlSession,
-        organisationId: String,
-        enabled: Boolean,
-        reason: String
-    ): JSONObject = rpc(
-        session,
-        "set_organiser_auto_publish",
-        JSONObject()
-            .put("p_organisation_id", organisationId)
-            .put("p_enabled", enabled)
-            .put("p_reason", reason)
-    )
-
-    suspend fun getPendingEvents(session: ControlSession): JSONArray =
-        getArray(session, "/rest/v1/events?select=id,title,description,category,starts_at,venue_name,address,city,organisation_id,created_at&status=eq.submitted&approval_status=eq.pending&order=created_at.asc")
-
     suspend fun getPublishedEventsForReview(session: ControlSession, limit: Int = 50): JSONArray {
         val result = rpc(
             session,
@@ -74,6 +92,32 @@ class SupabaseApi(
             JSONObject().put("p_limit", limit)
         )
         return result.optJSONArray("events") ?: JSONArray()
+    }
+
+    suspend fun getSpotlightEvents(session: ControlSession, limit: Int = 20): JSONArray {
+        val result = rpc(
+            session,
+            "get_tiqet_spotlight_events",
+            JSONObject().put("p_limit", limit.coerceIn(1, 20))
+        )
+        return result.optJSONArray("events") ?: JSONArray()
+    }
+
+    suspend fun setEventSpotlight(
+        session: ControlSession,
+        eventId: String,
+        featured: Boolean,
+        sortOrder: Int = 100,
+        endsAt: String? = null,
+        label: String = "Tiqet Spotlight"
+    ): JSONObject {
+        val body = JSONObject()
+            .put("p_event_id", eventId)
+            .put("p_featured", featured)
+            .put("p_sort_order", sortOrder.coerceIn(0, 10000))
+            .put("p_featured_label", label)
+        body.put("p_ends_at", endsAt)
+        return rpc(session, "set_tiqet_event_spotlight", body)
     }
 
     suspend fun flagPublishedEvent(session: ControlSession, eventId: String, reason: String): JSONObject =
@@ -98,6 +142,12 @@ class SupabaseApi(
 
     suspend fun getRefundsDashboard(session: ControlSession, limit: Int = 50): JSONObject =
         rpc(session, "get_tiqet_refunds_dashboard", JSONObject().put("p_limit", limit))
+
+    suspend fun getPlatformRevenueSummary(session: ControlSession): JSONObject = withContext(Dispatchers.IO) {
+        val result = request("GET", "/functions/v1/platform-revenue-summary", session = session)
+        if (!result.optBoolean("is_owner")) throw ApiException("Platform-owner access required.")
+        result
+    }
 
     suspend fun getChapaPayoutDestinations(session: ControlSession): JSONArray = withContext(Dispatchers.IO) {
         val result = request("GET", "/functions/v1/chapa-payout-banks", session = session)
@@ -220,20 +270,6 @@ class SupabaseApi(
         "review_organiser_application",
         JSONObject()
             .put("p_organisation_id", organisationId)
-            .put("p_decision", decision)
-            .put("p_notes", notes)
-    )
-
-    suspend fun reviewEvent(
-        session: ControlSession,
-        eventId: String,
-        decision: String,
-        notes: String
-    ): JSONObject = rpc(
-        session,
-        "review_event_submission",
-        JSONObject()
-            .put("p_event_id", eventId)
             .put("p_decision", decision)
             .put("p_notes", notes)
     )
