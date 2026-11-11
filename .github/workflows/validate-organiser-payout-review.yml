@@ -1,0 +1,66 @@
+name: Validate organiser payout review endpoint
+
+on:
+  push:
+    branches: [tiqet-organiser-payout-review]
+    paths:
+      - "supabase/functions/tiqet-admin-organiser-payout/**"
+      - "supabase/migrations/*organiser_payout_resolution*"
+      - "supabase/tests/organiser_payout_resolution*"
+      - ".github/workflows/validate-organiser-payout-review.yml"
+  pull_request:
+    paths:
+      - "supabase/functions/tiqet-admin-organiser-payout/**"
+      - "supabase/migrations/*organiser_payout_resolution*"
+      - "supabase/tests/organiser_payout_resolution*"
+      - ".github/workflows/validate-organiser-payout-review.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  deno-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Type-check organiser payout endpoint
+        run: deno check supabase/functions/tiqet-admin-organiser-payout/index.ts
+      - name: Test organiser payout state transitions
+        run: deno test supabase/functions/tiqet-admin-organiser-payout/policy.test.ts
+
+  postgres-migration:
+    name: PostgreSQL 17 payout ledger transition tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tiqet_payout_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tiqet_payout_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: tiqet_payout_test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Create disposable payout schema
+        run: psql -v ON_ERROR_STOP=1 -f supabase/tests/organiser_payout_resolution_bootstrap.sql
+      - name: Apply organiser payout resolution migration
+        run: psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261111090000_tiqet_admin_organiser_payout_resolution.sql
+      - name: Exercise payout transitions and settlement ledger
+        run: psql -v ON_ERROR_STOP=1 -f supabase/tests/organiser_payout_resolution.test.sql
