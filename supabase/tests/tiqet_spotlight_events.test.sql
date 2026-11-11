@@ -34,7 +34,7 @@ do $$ begin
     perform public.set_tiqet_event_spotlight('30000000-0000-4000-8000-000000000002',true,2,null,'Not approved');
     raise exception 'TEST_ASSERT: unapproved event was featured';
   exception when others then
-    if sqlerrm not like '%Only approved and published events can be featured%' then raise; end if;
+    if sqlerrm not like '%Only published events can be featured%' then raise; end if;
   end;
 end $$;
 
@@ -102,7 +102,7 @@ do $$ begin
     );
     raise exception 'TEST_ASSERT: another organizer changed event banner';
   exception when others then
-    if sqlerrm not like '%only update artwork for your own verified organisation events%' then raise; end if;
+    if sqlerrm not like '%only update artwork for your own organiser events%' then raise; end if;
   end;
 end $$;
 
