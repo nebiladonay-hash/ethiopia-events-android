@@ -66,6 +66,9 @@ if "fun userFacingError(error: Throwable, fallback: String): String" not in api:
                 "That email and password don't match. Check them and try again."
             message.contains("email not confirmed") ->
                 "Please confirm your email using the link we sent you."
+            message.contains("otp_expired") || message.contains("email link is invalid") ||
+                (message.contains("email confirmation") && message.contains("expired")) ->
+                "This confirmation link has expired. Request a new confirmation email."
             message.contains("user already registered") || message.contains("already registered") ->
                 "An account with this email already exists. Sign in instead."
             message.contains("password") && (message.contains("weak") || message.contains("characters")) ->
@@ -167,6 +170,25 @@ main_replace(
                 }
             } else {''',
     "Replace raw Discover error state with retry card"
+)
+main_replace(
+    '    var tickets by remember { mutableStateOf(emptyList<TiqetApi.Ticket>()) }\n    var loading by remember { mutableStateOf(true) }\n    var problem by remember { mutableStateOf("") }\n    LaunchedEffect(api) {\n        try {',
+    '    var tickets by remember { mutableStateOf(emptyList<TiqetApi.Ticket>()) }\n    var loading by remember { mutableStateOf(true) }\n    var problem by remember { mutableStateOf("") }\n    var ticketReloadKey by remember { mutableStateOf(0) }\n    LaunchedEffect(api, ticketReloadKey) {\n        loading = true\n        problem = ""\n        try {',
+    "Tickets refresh state"
+)
+main_replace(
+    '            problem.isNotBlank() -> EmptyMessage(problem)\n',
+    '''            problem.isNotBlank() -> Column(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                    .background(SoftIvory).border(1.dp, Hairline, RoundedCornerShape(16.dp)).padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(9.dp)
+            ) {
+                Text("Couldn't load your tickets", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(problem, color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
+                RedActionButton("Try again", { ticketReloadKey += 1 }, Modifier.width(145.dp))
+            }
+''',
+    "Replace Tickets raw error with retry card"
 )
 main_path.write_text(main)
 
