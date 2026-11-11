@@ -46,7 +46,8 @@ create table public.organisations (
   id uuid primary key,
   owner_id uuid not null,
   name text not null,
-  status public.organisation_status not null
+  status public.organisation_status not null,
+  payout_account_last4 text
 );
 create table public.events (
   id uuid primary key,
@@ -64,19 +65,41 @@ create table public.events (
   image_url text,
   status public.event_status not null,
   approval_status text not null,
+  created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 create table public.ticket_types (
   id uuid primary key,
   event_id uuid not null references public.events(id),
   name text not null,
+  description text not null default '',
   price_etb numeric not null,
+  quantity_total integer not null default 100,
+  quantity_reserved integer not null default 0,
+  quantity_sold integer not null default 0,
   sales_start timestamptz,
-  sales_end timestamptz
+  sales_end timestamptz,
+  per_order_limit integer not null default 10,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
-grant select on public.events, public.organisations to authenticated;
-create or replace function public.is_tiqet_admin() returns boolean language sql stable as $$
+alter table public.events enable row level security;
+alter table public.organisations enable row level security;
+alter table public.ticket_types enable row level security;
+
+grant select on public.events, public.organisations, public.ticket_types to authenticated;
+grant select on public.events, public.ticket_types to anon;
+
+create policy organisations_read_owner
+on public.organisations for select to authenticated
+using (owner_id = (select auth.uid()));
+
+create or replace function public.is_tiqet_admin() returns boolean language sql stable as $
   select auth.uid() is not null
-$$;
+$;
+create or replace function public.is_tiqet_moderator() returns boolean language sql stable as $
+  select auth.uid() is not null
+$;
 grant usage on schema public to anon, authenticated, service_role;
 grant execute on function public.is_tiqet_admin() to authenticated, service_role;
+grant execute on function public.is_tiqet_moderator() to authenticated, service_role;
