@@ -728,7 +728,7 @@ private fun OrganiserQueueScreen(
         item {
             ScreenHeading(
                 "Organiser applications",
-                "Verify organisers first. Trusted organisers can publish ordinary events without waiting for each event review."
+                "Organiser verification is separate from event publishing. New events go live immediately; verified settlement details are needed for paid tickets and payouts."
             )
         }
         item {
