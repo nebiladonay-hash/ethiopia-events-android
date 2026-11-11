@@ -46,7 +46,7 @@ replace_once(organizer,
     "    var ticketName by remember { mutableStateOf(\"Regular\") }\n"
     "    var price by remember { mutableStateOf(\"\") }\n"
     "    var quantity by remember { mutableStateOf(\"\") }\n",
-    "    var regularPrice by remember { mutableStateOf(\"\") }\n"
+    "    var regularPrice by remember { mutableStateOf(\"0\") }\n"
     "    var regularQuantity by remember { mutableStateOf(\"100\") }\n"
     "    var includeVip by remember { mutableStateOf(false) }\n"
     "    var vipPrice by remember { mutableStateOf(\"\") }\n"
@@ -115,6 +115,21 @@ new_form = """            Text("Create an event", color = OrgInk, fontSize = 19.
             Spacer(Modifier.height(10.dp))
             OrgField("Event name", eventTitle, { eventTitle = it })
             OrgField("Category", eventCategory, { eventCategory = it })
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                listOf("Music", "Boxing Matches", "Culture", "Nightlife", "Sports", "Conference", "Other").forEach { category ->
+                    Button(
+                        onClick = { eventCategory = category },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 5.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (eventCategory == category) OrgRed else Color.White,
+                            contentColor = if (eventCategory == category) Color.White else OrgInk
+                        )
+                    ) { Text(category, fontSize = 10.sp) }
+                }
+            }
             OrgField("Short description (optional)", eventDescription, { eventDescription = it }, singleLine = false)
             OrgField("Date and time · Addis Ababa (YYYY-MM-DD HH:MM)", eventDate, { eventDate = it })
             OrgField("Venue", venueName, { venueName = it })
@@ -225,7 +240,7 @@ new_form = """            Text("Create an event", color = OrgInk, fontSize = 19.
                         error = ""
                         notice = ""
                         val selectedBanner = eventBannerUri
-                        val ownerOrganisationId = eventOrganisationId
+                        val ownerOrganisationId = eventOrganisationId ?: ""
                         scope.launch {
                             try {
                                 val submission = withContext(Dispatchers.IO) {
