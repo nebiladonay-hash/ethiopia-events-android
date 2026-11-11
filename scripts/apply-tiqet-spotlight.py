@@ -313,7 +313,7 @@ replace_once(organizer,
 )
 replace_once(organizer,
     "import androidx.compose.ui.graphics.Color\n",
-    "import androidx.compose.ui.graphics.Color\nimport androidx.compose.ui.layout.ContentScale\nimport coil.compose.AsyncImage\n",
+    "import androidx.compose.ui.graphics.Color\nimport androidx.compose.ui.draw.clip\nimport androidx.compose.ui.layout.ContentScale\nimport coil.compose.AsyncImage\n",
     "Organizer artwork preview imports"
 )
 replace_once(organizer,
@@ -333,7 +333,11 @@ banner_picker = """
                 try {
                     withContext(Dispatchers.IO) { api.uploadEventBanner(organisationId, eventId, uri) }
                     notice = "Your banner has been uploaded and attached to your event. Spotlight never replaces organizer artwork."
-                    refresh()
+                    val refreshed = withContext(Dispatchers.IO) {
+                        api.fetchMyOrganisations() to api.fetchMyOrganiserEvents()
+                    }
+                    organisations = refreshed.first
+                    events = refreshed.second
                 } catch (exception: Exception) {
                     error = exception.message ?: "Your event banner could not be uploaded."
                     notice = ""
