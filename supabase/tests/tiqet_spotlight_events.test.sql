@@ -55,12 +55,31 @@ end $$;
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
 values('tiqet-event-banners','tiqet-event-banners',true,8388608,array['image/jpeg','image/png','image/webp'])
 on conflict (id) do nothing;
+-- Exercise Storage RLS using authenticated organizer identities, not the database owner.
+select set_config('request.jwt.claim.sub','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',true);
+set role authenticated;
 insert into storage.objects(bucket_id,name,owner_id) values(
  'tiqet-event-banners',
  '20000000-0000-4000-8000-000000000001/30000000-0000-4000-8000-000000000001/banner.jpg',
  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 );
 
+select set_config('request.jwt.claim.sub','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',true);
+do $ begin
+  begin
+    insert into storage.objects(bucket_id,name,owner_id) values(
+      'tiqet-event-banners',
+      '20000000-0000-4000-8000-000000000001/30000000-0000-4000-8000-000000000001/other-organizer.jpg',
+      'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+    );
+    raise exception 'TEST_ASSERT: another organizer uploaded into a different organizer event path';
+  exception when insufficient_privilege then
+    null;
+  end;
+end $;
+reset role;
+
+select set_config('request.jwt.claim.sub','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',true);
 select public.set_organiser_event_banner(
  '30000000-0000-4000-8000-000000000001',
  'https://project.supabase.co/storage/v1/object/public/tiqet-event-banners/20000000-0000-4000-8000-000000000001/30000000-0000-4000-8000-000000000001/banner.jpg'
