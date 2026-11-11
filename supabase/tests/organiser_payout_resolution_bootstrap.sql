@@ -38,3 +38,5 @@ create table public.organiser_settlement_ledger (
   description text not null default '',
   created_at timestamptz not null default now()
 );
+
+grant select on public.organiser_payout_requests, public.organiser_settlement_ledger to service_role;
