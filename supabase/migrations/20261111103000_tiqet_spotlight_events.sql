@@ -58,7 +58,17 @@ begin
         'minimum_price_etb', cheapest.price_etb,
         'ticket_type_id', cheapest.id,
         'ticket_type_name', cheapest.name,
-        'featured_label', s.featured_label
+        'featured_label', s.featured_label,
+        'ticket_types', coalesce((
+          select jsonb_agg(
+            jsonb_build_object('id', tt.id, 'name', tt.name, 'price_etb', tt.price_etb)
+            order by tt.price_etb asc
+          )
+          from public.ticket_types tt
+          where tt.event_id = e.id
+            and (tt.sales_start is null or tt.sales_start <= now())
+            and (tt.sales_end is null or tt.sales_end > now())
+        ), '[]'::jsonb)
       ) as item
     from public.tiqet_event_spotlight s
     join public.events e on e.id = s.event_id
