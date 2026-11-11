@@ -48,6 +48,8 @@ begin
     raise exception 'TEST_ASSERT: organizer artwork was replaced or omitted';
   end if;
   if v_event->>'featured_label' <> 'Fight Night Spotlight' then raise exception 'TEST_ASSERT: spotlight label missing'; end if;
+  if (v_event->>'spotlight_sort_order')::integer <> 1 then raise exception 'TEST_ASSERT: Spotlight priority missing'; end if;
+  if v_event->>'spotlight_ends_at' is null then raise exception 'TEST_ASSERT: Spotlight expiry missing'; end if;
   v_ticket_count := jsonb_array_length(v_event->'ticket_types');
   if v_ticket_count <> 2 then raise exception 'TEST_ASSERT: ticket options were not included'; end if;
 end $$;
