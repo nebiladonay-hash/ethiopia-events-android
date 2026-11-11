@@ -35,8 +35,8 @@ replace_once(organizer,
     "Organizer image Uri import")
 replace_once(organizer,
     "    val verifiedOrganisationId = if (organisationStatus == \"verified\") organisation?.optString(\"id\") else null\n",
-    "    val verifiedOrganisationId = if (organisationStatus == \"verified\") organisation?.optString(\"id\") else null\n"
-    "    val eventOrganisationId = organisation?.optString(\"id\")?.takeIf { it.isNotBlank() && it != \"null\" }\n",
+    "    val verifiedOrganisationId = organisation?.optString(\"id\")?.takeIf { it.isNotBlank() && it != \"null\" }\n"
+    "    val eventOrganisationId = verifiedOrganisationId\n",
     "Allow event creation for owned organiser profiles")
 replace_once(organizer,
     "    var ticketName by remember { mutableStateOf(\"Regular\") }\n"
@@ -87,7 +87,7 @@ new_status = """        } else if (organisationStatus == "suspended") {
             StatusPanel("Organiser access unavailable", organisation.optString("verification_notes", "Contact Tiqet support for the next steps."), "SUSPENDED")
         } else if (organisation != null) {
             if (verifiedOrganisationId != null) {
-                StatusPanel("Organisation verified", "${organisation.optString("name")} is verified. Your settlement account can receive paid ticket proceeds.", "VERIFIED")"""
+                StatusPanel("Organiser profile ready", "${organisation.optString("name")} can publish events now. Connect a bank or mobile-money destination to sell paid tickets.", "READY")"""
 replace_once(organizer, old_status, new_status, "Allow pending and rejected organiser profiles to publish")
 
 replace_once(
