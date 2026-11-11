@@ -65,7 +65,7 @@ insert into storage.objects(bucket_id,name,owner_id) values(
 );
 
 select set_config('request.jwt.claim.sub','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',true);
-do $ begin
+do $storage_test$ begin
   begin
     insert into storage.objects(bucket_id,name,owner_id) values(
       'tiqet-event-banners',
@@ -76,7 +76,7 @@ do $ begin
   exception when insufficient_privilege then
     null;
   end;
-end $;
+end $storage_test$;
 reset role;
 
 select set_config('request.jwt.claim.sub','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',true);
