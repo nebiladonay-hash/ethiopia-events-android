@@ -353,7 +353,7 @@ begin
   select coalesce(jsonb_agg(x.item order by x.sort_order asc, x.starts_at asc), '[]'::jsonb)
     into v_events
   from (
-    select s.sort_order, s.starts_at,
+    select s.sort_order, e.starts_at,
       jsonb_build_object(
         'id', e.id, 'title', e.title, 'description', e.description, 'category', e.category,
         'starts_at', e.starts_at, 'ends_at', e.ends_at, 'timezone', e.timezone,
