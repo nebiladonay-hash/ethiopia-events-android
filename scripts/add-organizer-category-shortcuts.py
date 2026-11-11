@@ -26,12 +26,12 @@ replace_once(
 
 source = organizer.read_text()
 lines = source.splitlines()
-matches = [i for i, line in enumerate(lines) if "eventCategory" in line and "OrgField(" in line]
+matches = [i for i, line in enumerate(lines) if 'OrgField("Event title"' in line]
 if len(matches) != 1:
-    context = [line for line in lines if "eventCategory" in line]
+    context = [line for line in lines if "eventTitle" in line or "Event title" in line]
     raise SystemExit(
-        f"Organizer category quick-picks: expected one category field; found {len(matches)}. "
-        f"eventCategory references: {context}"
+        f"Organizer category quick-picks: expected one event-title field; found {len(matches)}. "
+        f"event-title references: {context}"
     )
 index = matches[0]
 indent = lines[index][:len(lines[index]) - len(lines[index].lstrip())]
@@ -51,7 +51,8 @@ block = [
     indent + '        ) { Text(category, fontSize = 10.sp) }',
     indent + '    }',
     indent + '}',
+    indent + 'Spacer(Modifier.height(7.dp))',
 ]
 lines[index + 1:index + 1] = block
 organizer.write_text("\n".join(lines) + "\n")
-print("Organizer event form now includes Boxing Matches and banner upload uses the selected verified organization.")
+print("Organizer event form quick-picks added, including Boxing Matches.")
