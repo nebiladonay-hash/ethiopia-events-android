@@ -7,6 +7,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.UnknownHostException
+import java.net.SocketTimeoutException
+import java.net.ConnectException
+import javax.net.ssl.SSLException
+import java.util.Locale
 
 data class ControlSession(
     val accessToken: String,
@@ -22,6 +27,41 @@ class SupabaseApi(
 ) {
     val isConfigured: Boolean
         get() = projectUrl.startsWith("https://") && publishableKey.isNotBlank()
+
+    fun userFacingError(error: Throwable, fallback: String): String {
+        val apiError = error as? ApiException
+        val message = (apiError?.message ?: error.message.orEmpty()).lowercase(Locale.US)
+        val status = apiError?.statusCode
+        return when {
+            error is UnknownHostException || error is ConnectException ||
+                message.contains("unknownhostexception") || message.contains("unable to resolve host") ->
+                "Couldn't connect to Tiqet. Check your internet connection and try again."
+            error is SocketTimeoutException || message.contains("sockettimeoutexception") ||
+                message.contains("timed out") ->
+                "Tiqet is taking too long to respond. Check your connection and try again."
+            error is SSLException || message.contains("sslhandshake") || message.contains("certpath") ->
+                "A secure connection couldn't be made. Check your phone's date and time, then try again."
+            message.contains("invalid login credentials") || message.contains("invalid_credentials") ->
+                "That email and password don't match. Check them and try again."
+            message.contains("email not confirmed") ->
+                "Please confirm your email before signing in."
+            status == 401 ->
+                "Your session has expired. Sign in again to continue."
+            status == 403 ->
+                "This account doesn't have permission to do that."
+            status == 404 ->
+                "This Control feature is temporarily unavailable. Please try again shortly."
+            status == 409 ->
+                "This request has already been processed or needs a quick check. Refresh and try again."
+            status == 429 ->
+                "Too many attempts. Wait a moment, then try again."
+            status != null && status >= 500 ->
+                "Tiqet is temporarily unavailable. Please try again shortly."
+            apiError != null && status == null ->
+                apiError.message?.takeIf { it.isNotBlank() } ?: fallback
+            else -> fallback
+        }
+    }
 
     suspend fun signIn(email: String, password: String): ControlSession = withContext(Dispatchers.IO) {
         val json = request(
