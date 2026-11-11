@@ -17,13 +17,6 @@ replace_once(
     "import androidx.compose.foundation.background\nimport androidx.compose.foundation.horizontalScroll\n",
     "Organizer horizontal-scroll import"
 )
-replace_once(
-    """        val currentOrganisation = organisations.optJSONObject(0)
-        val organisationId = currentOrganisation?.takeIf { it.optString("status") == "verified" }?.optString("id")""",
-    """        val organisationId = verifiedOrganisationId""",
-    "Use selected verified organization for banner upload"
-)
-
 source = organizer.read_text()
 lines = source.splitlines()
 matches = [i for i, line in enumerate(lines) if 'OrgField("Event title"' in line]
