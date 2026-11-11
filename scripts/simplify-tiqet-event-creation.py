@@ -29,6 +29,13 @@ def replace_region(path: Path, start_marker: str, end_marker: str, replacement: 
 
 
 # ---------- Organizer event creation ----------
+replace_once(
+    organizer,
+    "    var selectedScanEventId by remember { mutableStateOf<String?>(null) }\n",
+    "    var selectedScanEventId by remember { mutableStateOf<String?>(null) }\n"
+    "    var eventBannerUri by remember { mutableStateOf<Uri?>(null) }\n",
+    "Initialize event poster state before picker callback"
+)
 replace_once(organizer,
     "import com.journeyapps.barcodescanner.ScanOptions\n",
     "import com.journeyapps.barcodescanner.ScanOptions\nimport android.net.Uri\n",
@@ -50,7 +57,7 @@ replace_once(organizer,
     "    var includeVvip by remember { mutableStateOf(false) }\n"
     "    var vvipPrice by remember { mutableStateOf(\"\") }\n"
     "    var vvipQuantity by remember { mutableStateOf(\"25\") }\n"
-    "    var eventBannerUri by remember { mutableStateOf<Uri?>(null) }\n",
+
     "Simple regular VIP VVIP ticket form state")
 replace_once(organizer,
     "    val bannerPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->",
