@@ -304,28 +304,7 @@ replace_once(api,
 )
 
 # Organizer workspace: banner picker and owner-only update action.
-replace_once(organizer,
-    '            OrgField("Category", eventCategory, { eventCategory = it })\\n',
-    '''            OrgField("Category", eventCategory, { eventCategory = it })
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                listOf("Music", "Boxing Matches", "Culture", "Nightlife", "Sports", "Conference").forEach { category ->
-                    Button(
-                        onClick = { eventCategory = category },
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 5.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (eventCategory == category) OrgRed else Color.White,
-                            contentColor = if (eventCategory == category) Color.White else OrgInk
-                        )
-                    ) { Text(category, fontSize = 10.sp) }
-                }
-            }
-''',
-    "Organizer category quick-picks including Boxing Matches"
-)
-
+# Organizer category chips are applied by the separate organizer form transformer.
 
 replace_once(organizer,
     "import androidx.activity.compose.rememberLauncherForActivityResult\n",
