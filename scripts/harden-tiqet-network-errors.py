@@ -172,7 +172,7 @@ main_path.write_text(main)
 replace_message_expressions(organiser_path, "api")
 
 # The instant-publish transformer inserts a banner upload fallback string; keep that message friendly too.
-simplify_path = root.parent / "scripts/simplify-tiqet-event-creation.py"
+simplify_path = Path(__file__).with_name("simplify-tiqet-event-creation.py")
 if simplify_path.exists():
     s = simplify_path.read_text()
     old = 'bannerError.message ?: "try again from Your event records"'
