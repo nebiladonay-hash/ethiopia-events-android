@@ -332,14 +332,28 @@ replace_once(api,
     '"&status=eq.published&approval_status=eq.approved&order=starts_at.asc"',
     '"&status=eq.published&order=starts_at.asc"',
     "Remove event approval filter from public discovery")
-replace_once(api,
-    "                ticketTypeName = cheapest?.optString(\"name\")?.takeIf { !it.isNullOrBlank() && it != \"null\" }\n",
-    "                ticketTypeName = cheapest?.optString(\"name\")?.takeIf { !it.isNullOrBlank() && it != \"null\" },\n"
-    "                ticketOptions = ticketRows.mapNotNull { ticket ->\n"
-    "                    val id = ticket.optString(\"id\")\n"
-    "                    if (id.isBlank() || id == \"null\") null else TicketOption(id, ticket.optString(\"name\", \"Regular\"), ticket.optDouble(\"price_etb\"))\n"
-    "                }\n",
-    "Populate ticket tiers from public event response")
+api_source = api.read_text()
+published_start = api_source.find("    fun fetchPublishedEvents(")
+spotlight_start = api_source.find("    fun fetchSpotlightEvents(", published_start + 1)
+if published_start < 0 or spotlight_start < 0:
+    raise SystemExit("Could not find public/Spotlight event reader boundaries.")
+published_region = api_source[published_start:spotlight_start]
+old_public_event = """                ticketTypeName = cheapest?.optString("name")?.takeIf { !it.isNullOrBlank() && it != "null" }
+"""
+new_public_event = """                ticketTypeName = cheapest?.optString("name")?.takeIf { !it.isNullOrBlank() && it != "null" },
+                ticketOptions = ticketRows.mapNotNull { ticket ->
+                    val id = ticket.optString("id")
+                    if (id.isBlank() || id == "null") null else TicketOption(id, ticket.optString("name", "Regular"), ticket.optDouble("price_etb"))
+                }
+"""
+if published_region.count(old_public_event) != 1:
+    raise SystemExit(
+        "Public event ticket tier mapping: expected one constructor inside fetchPublishedEvents; "
+        f"found {published_region.count(old_public_event)}"
+    )
+published_region = published_region.replace(old_public_event, new_public_event, 1)
+api.write_text(api_source[:published_start] + published_region + api_source[spotlight_start:])
+
 replace_once(api,
     "    fun createEventSubmission(\n",
     """    fun createEventWithTicketOptions(
