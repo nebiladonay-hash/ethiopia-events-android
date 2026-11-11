@@ -210,6 +210,7 @@ jobs:
           grep -q 'create_event_with_ticket_options' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
           grep -q 'fitTiqetEventBanner' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
           ! grep -q 'approval_status=eq.approved' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
+          grep -q 'val rows = requestArray("GET", "/rest/v1/events?$query", useSession = false)' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
           ! grep -q 'set_organiser_auto_publish' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
           ! grep -q 'set_organiser_auto_publish' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
           grep -q 'VVIP' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
