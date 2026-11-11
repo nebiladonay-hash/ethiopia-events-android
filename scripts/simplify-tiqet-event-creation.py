@@ -614,6 +614,13 @@ new_ticket_block = """        val chosenTicket = selectedTicketOption ?: event.t
             Text(ticketCount.toString(), color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Text("+", color = BrandRed, fontSize = 23.sp, modifier = Modifier.clickable { if (ticketCount < 10) ticketCount++ }.padding(horizontal = 10.dp))
         }"""
+main_source = main.read_text()
+if main_source.count(old_ticket_block) != 1:
+    detail_start = main_source.find("private fun EventDetailScreen(")
+    snippet = main_source[detail_start:detail_start + 11000]
+    raise SystemExit(
+        "Ticket block did not match after Tiqet visual patches. Event detail source follows:\\n" + snippet
+    )
 replace_once(main, old_ticket_block, new_ticket_block, "Add selectable Regular VIP VVIP customer ticket options")
 replace_once(main, "val ticketSubtotal = event.price * ticketCount.toDouble()", "val ticketSubtotal = chosenTicketPrice * ticketCount.toDouble()", "Calculate selected tier total")
 replace_once(main, "                    val ticketTypeId = event.ticketTypeId", "                    val ticketTypeId = chosenTicketTypeId", "Checkout selected ticket tier")
