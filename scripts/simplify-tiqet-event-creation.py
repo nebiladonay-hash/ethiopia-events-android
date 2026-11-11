@@ -634,7 +634,7 @@ if ticket_start < 0 or ticket_end < 0:
 detail_region = main_source[detail_start:]
 if detail_region.count('        Text("Tickets", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)') != 1:
     raise SystemExit("Expected one ticket selector inside the event detail screen.")
-main_source = main_source[:ticket_start] + new_ticket_block + "\\n" + main_source[ticket_end:]
+main_source = main_source[:ticket_start] + new_ticket_block + "\n" + main_source[ticket_end:]
 
 # A paid VIP/VVIP ticket may exist even when the Regular ticket is free. Load payment methods
 # and show their picker whenever any available tier is paid.
