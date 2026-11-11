@@ -235,6 +235,7 @@ private fun ControlWorkspace(
     var verifiedOrganisers by remember { mutableStateOf(JSONArray()) }
     var events by remember { mutableStateOf(JSONArray()) }
     var publishedEvents by remember { mutableStateOf(JSONArray()) }
+    var spotlightEvents by remember { mutableStateOf(JSONArray()) }
     var staff by remember { mutableStateOf(JSONArray()) }
     var audit by remember { mutableStateOf(JSONArray()) }
     var finance by remember { mutableStateOf(JSONObject()) }
@@ -258,6 +259,7 @@ private fun ControlWorkspace(
                 events = api.getPendingEvents(session)
                 if (overview.optBoolean("admin_access")) {
                     publishedEvents = api.getPublishedEventsForReview(session)
+                    spotlightEvents = api.getSpotlightEvents(session)
                     organisers = api.getOrganisers(session)
                     verifiedOrganisers = api.getVerifiedOrganisers(session)
                     audit = api.getAuditLog(session)
@@ -396,6 +398,7 @@ private fun ControlWorkspace(
                 ControlTab.EVENTS -> EventQueueScreen(
                     items = events,
                     publishedItems = publishedEvents,
+                    spotlightItems = spotlightEvents,
                     busy = busy,
                     onReview = { id, decision, notes ->
                         scope.launch {
@@ -417,6 +420,19 @@ private fun ControlWorkspace(
                                 refresh()
                             } catch (e: Exception) { error = e.message ?: "Could not flag event." }
                             finally { busy = false }
+                        }
+                    },
+                    onSetSpotlight = { id, featured ->
+                        scope.launch {
+                            busy = true
+                            try {
+                                api.setEventSpotlight(session, id, featured)
+                                notice = if (featured) "Event added to Tiqet Spotlight. Its organizer-owned banner remains unchanged."
+                                    else "Event removed from Tiqet Spotlight. Its organizer-owned banner remains unchanged."
+                                refresh()
+                            } catch (e: Exception) {
+                                error = e.message ?: "Could not update Tiqet Spotlight."
+                            } finally { busy = false }
                         }
                     }
                 )
@@ -824,14 +840,19 @@ private fun OrganiserQueueScreen(
 private fun EventQueueScreen(
     items: JSONArray,
     publishedItems: JSONArray,
+    spotlightItems: JSONArray,
     busy: Boolean,
     onReview: (String, String, String) -> Unit,
-    onFlagPublished: (String,String) -> Unit
+    onFlagPublished: (String,String) -> Unit,
+    onSetSpotlight: (String, Boolean) -> Unit
 ) {
     var notes by remember { mutableStateOf("") }
     var flagReason by remember { mutableStateOf("") }
     var selectedPublishedEvent by remember { mutableStateOf<JSONObject?>(null) }
     var showFlagConfirm by remember { mutableStateOf(false) }
+    val spotlightIds = remember(spotlightItems) {
+        (0 until spotlightItems.length()).mapNotNull { spotlightItems.optJSONObject(it)?.optString("id")?.takeIf { id -> id.isNotBlank() } }.toSet()
+    }
 
     LazyColumn(
         modifier=Modifier.fillMaxSize().padding(horizontal=16.dp),
@@ -889,6 +910,25 @@ private fun EventQueueScreen(
                     if(event.optString("description").isNotBlank()) {
                         Text(event.optString("description"),color=Ink,fontSize=11.sp,lineHeight=15.sp,maxLines=3,overflow=TextOverflow.Ellipsis)
                     }
+                    val isFeatured = spotlightIds.contains(event.optString("id"))
+                    if (isFeatured) {
+                        Spacer(Modifier.height(7.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            StatusPill("Spotlight")
+                            Spacer(Modifier.width(8.dp))
+                            Text("Curated placement is active", color = Teal, fontSize = 10.sp)
+                        }
+                    }
+                    Spacer(Modifier.height(7.dp))
+                    OutlinedButton(
+                        onClick = { onSetSpotlight(event.optString("id"), !isFeatured) },
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(11.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = if (isFeatured) Danger else Teal)
+                    ) { Text(if (isFeatured) "Remove from Tiqet Spotlight" else "Feature in Tiqet Spotlight", fontSize = 10.sp) }
+                    Spacer(Modifier.height(4.dp))
+                    Text("Spotlight uses the event banner supplied by its organizer. Tiqet does not replace event artwork.", color = Muted, fontSize = 9.sp, lineHeight = 13.sp)
                     Spacer(Modifier.height(7.dp))
                     OutlinedButton(
                         onClick={selectedPublishedEvent=event;showFlagConfirm=true},
