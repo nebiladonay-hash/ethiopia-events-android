@@ -324,8 +324,7 @@ replace_once(organizer,
 banner_picker = """
     val bannerPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         val eventId = selectedBannerEventId
-        val currentOrganisation = organisations.optJSONObject(0)
-        val organisationId = currentOrganisation?.takeIf { it.optString("status") == "verified" }?.optString("id")
+        val organisationId = verifiedOrganisationId
         if (uri != null && !eventId.isNullOrBlank() && !organisationId.isNullOrBlank()) {
             scope.launch {
                 working = true
