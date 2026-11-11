@@ -253,6 +253,12 @@ do $no_event_approval_rpc$ begin
   if to_regprocedure('public.review_event_submission(uuid,text,text)') is not null then
     raise exception 'TEST_ASSERT: legacy event approval RPC still exists';
   end if;
+  if to_regprocedure('public.set_organiser_auto_publish(uuid,boolean,text)') is not null then
+    raise exception 'TEST_ASSERT: obsolete trusted-organiser auto-publish RPC still exists';
+  end if;
+  if to_regprocedure('public.get_tiqet_verified_organisers()') is not null then
+    raise exception 'TEST_ASSERT: obsolete trusted-organiser listing RPC still exists';
+  end if;
 end $no_event_approval_rpc$;
 
 -- Spotlight eligibility is now about a live, future event with artwork, not pre-publication approval.
