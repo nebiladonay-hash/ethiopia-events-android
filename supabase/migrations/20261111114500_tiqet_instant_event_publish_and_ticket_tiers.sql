@@ -184,9 +184,11 @@ begin
   if p_venue_name is null or char_length(btrim(p_venue_name)) < 2 then
     raise exception 'Enter the event venue';
   end if;
-  if jsonb_typeof(p_ticket_options) <> 'array'
-     or jsonb_array_length(p_ticket_options) not between 1 and 3 then
+  if p_ticket_options is null or jsonb_typeof(p_ticket_options) is distinct from 'array' then
     raise exception 'Add at least one ticket option (Regular, VIP or VVIP)';
+  end if;
+  if jsonb_array_length(p_ticket_options) not between 1 and 3 then
+    raise exception 'Add between one and three ticket options';
   end if;
 
   select count(*), count(distinct lower(btrim(x.name)))
@@ -216,6 +218,19 @@ begin
     where btrim(x.name) = 'Regular'
   ) then
     raise exception 'A Regular ticket option is required';
+  end if;
+
+  if exists (
+    select 1
+    from jsonb_to_recordset(p_ticket_options) as x(name text, price_etb numeric, quantity_total integer)
+    where x.price_etb > 0
+  ) and not exists (
+    select 1 from public.organisations o
+    where o.id = p_organisation_id
+      and o.owner_id = v_user
+      and nullif(btrim(o.payout_account_last4), '') is not null
+  ) then
+    raise exception 'Connect a settlement account before offering paid tickets';
   end if;
 
   insert into public.events(
