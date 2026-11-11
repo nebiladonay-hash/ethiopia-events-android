@@ -173,14 +173,12 @@ main_path.write_text(main)
 # Organizer: clean connection/auth errors in ticket scan, settlement, applications and event creation.
 replace_message_expressions(organiser_path, "api")
 
-# The instant-publish transformer inserts a banner upload fallback string; keep that message friendly too.
-simplify_path = Path(__file__).with_name("simplify-tiqet-event-creation.py")
-if simplify_path.exists():
-    s = simplify_path.read_text()
-    old = 'bannerError.message ?: "try again from Your event records"'
-    new = 'api.userFacingError(bannerError, "try again from Your event records")'
-    if old in s:
-        simplify_path.write_text(s.replace(old, new, 1))
+# The instant-publish transformer inserts a banner upload fallback string; clean the generated Kotlin too.
+organiser_source = organiser_path.read_text()
+banner_error = 'bannerError.message ?: "try again from Your event records"'
+friendly_banner_error = 'api.userFacingError(bannerError, "try again from Your event records")'
+if banner_error in organiser_source:
+    organiser_path.write_text(organiser_source.replace(banner_error, friendly_banner_error, 1))
 
 # Defensive assertions: no raw error body should be assigned to onboarding fields.
 checks = {
