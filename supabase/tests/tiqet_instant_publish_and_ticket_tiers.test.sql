@@ -2,14 +2,44 @@ begin;
 
 insert into auth.users(id,email) values
  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','admin@tiqet.test'),
- ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','new-organiser@tiqet.test');
+ ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','new-organiser@tiqet.test'),
+ ('cccccccc-cccc-4ccc-8ccc-cccccccccccc','rejected-organiser@tiqet.test'),
+ ('dddddddd-dddd-4ddd-8ddd-dddddddddddd','suspended-organiser@tiqet.test');
 
 insert into public.organisations(id,owner_id,name,status,payout_account_last4) values
  ('20000000-0000-4000-8000-000000000001','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','Another Organiser','verified',null),
- ('20000000-0000-4000-8000-000000000002','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','New Organiser','pending',null);
+ ('20000000-0000-4000-8000-000000000002','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','New Organiser','pending',null),
+ ('20000000-0000-4000-8000-000000000003','cccccccc-cccc-4ccc-8ccc-cccccccccccc','Rejected Organiser','rejected',null),
+ ('20000000-0000-4000-8000-000000000004','dddddddd-dddd-4ddd-8ddd-dddddddddddd','Suspended Organiser','suspended',null);
 
 -- An authenticated organiser must not be able to publish paid tickets before connecting a settlement destination.
 select set_config('request.jwt.claim.sub','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',true);
+-- A pending organiser can publish a free event immediately without waiting for approval or a bank account.
+create temporary table tiqet_test_free_event(event_id uuid not null);
+grant select on tiqet_test_free_event to anon, authenticated;
+insert into tiqet_test_free_event(event_id)
+select (public.create_event_with_ticket_options(
+  '20000000-0000-4000-8000-000000000002',
+  'Free Community Meetup',
+  '',
+  'Culture',
+  now()+interval '14 days',
+  'Community Hall',
+  '',
+  'Addis Ababa',
+  '[{"name":"Regular","price_etb":0,"quantity_total":120}]'::jsonb
+)->>'event_id')::uuid;
+
+do $pending_free_publish_test$ begin
+  if not exists (
+    select 1 from public.events e
+    where e.id=(select event_id from tiqet_test_free_event)
+      and e.status='published'::public.event_status
+  ) then
+    raise exception 'TEST_ASSERT: pending organiser free event did not publish immediately';
+  end if;
+end $pending_free_publish_test$;
+
 do $paid_gate_test$ begin
   begin
     perform public.create_event_with_ticket_options(
@@ -29,6 +59,55 @@ do $paid_gate_test$ begin
   end;
 end $paid_gate_test$;
 
+-- A rejected-but-not-suspended profile is also allowed to publish a free event immediately.
+select set_config('request.jwt.claim.sub','cccccccc-cccc-4ccc-8ccc-cccccccccccc',true);
+create temporary table tiqet_test_rejected_event(event_id uuid not null);
+grant select on tiqet_test_rejected_event to anon, authenticated;
+insert into tiqet_test_rejected_event(event_id)
+select (public.create_event_with_ticket_options(
+  '20000000-0000-4000-8000-000000000003',
+  'Independent Music Gathering',
+  '',
+  'Music',
+  now()+interval '18 days',
+  'Open Air Stage',
+  '',
+  'Addis Ababa',
+  '[{"name":"Regular","price_etb":0,"quantity_total":75}]'::jsonb
+)->>'event_id')::uuid;
+do $rejected_free_publish_test$ begin
+  if not exists (
+    select 1 from public.events e
+    where e.id=(select event_id from tiqet_test_rejected_event)
+      and e.status='published'::public.event_status
+  ) then
+    raise exception 'TEST_ASSERT: rejected organiser profile still blocked instant event publishing';
+  end if;
+end $rejected_free_publish_test$;
+
+-- A suspended organiser remains blocked as a separate account-level enforcement action.
+select set_config('request.jwt.claim.sub','dddddddd-dddd-4ddd-8ddd-dddddddddddd',true);
+do $suspended_publish_test$ begin
+  begin
+    perform public.create_event_with_ticket_options(
+      '20000000-0000-4000-8000-000000000004',
+      'Suspended Account Event',
+      '',
+      'Music',
+      now()+interval '18 days',
+      'Another Venue',
+      '',
+      'Addis Ababa',
+      '[{"name":"Regular","price_etb":0,"quantity_total":75}]'::jsonb
+    );
+    raise exception 'TEST_ASSERT: suspended organiser published an event';
+  exception when others then
+    if sqlerrm not like '%organiser account is unavailable%' then raise; end if;
+  end;
+end $suspended_publish_test$;
+
+-- Continue with the new pending organiser's paid-ticket settlement gate.
+select set_config('request.jwt.claim.sub','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',true);
 -- Once the organiser connects a payout destination, all three tier options can be published at once.
 update public.organisations
 set payout_account_last4='6789'
