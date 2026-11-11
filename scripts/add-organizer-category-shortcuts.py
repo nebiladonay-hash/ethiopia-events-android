@@ -6,7 +6,38 @@ import sys
 organizer = Path(sys.argv[1]) / "app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
 
 def replace_once(old: str, new: str, label: str) -> None:
-    source = organizer.read_text()
+    replace_once(
+    "    var selectedBannerEventId by remember { mutableStateOf<String?>(null) }\\n",
+    "    var selectedBannerEventId by remember { mutableStateOf<String?>(null) }\\n    var selectedBannerOrganisationId by remember { mutableStateOf<String?>(null) }\\n",
+    "Selected banner organization state"
+)
+replace_once(
+    "        val organisationId = verifiedOrganisationId\\n",
+    "        val organisationId = selectedBannerOrganisationId\\n",
+    "Use event-specific organization for banner upload"
+)
+replace_once(
+    "                    selectedBannerEventId = null\\n",
+    "                    selectedBannerEventId = null\\n                    selectedBannerOrganisationId = null\\n",
+    "Clear selected banner organization after upload"
+)
+replace_once(
+    "            selectedBannerEventId = null\\n",
+    "            selectedBannerEventId = null\\n            selectedBannerOrganisationId = null\\n",
+    "Clear selected banner organization on picker cancel"
+)
+replace_once(
+    "                            selectedBannerEventId = event.optString(\\\"id\\\")\\n",
+    "                            selectedBannerEventId = event.optString(\\\"id\\\")\\n                            selectedBannerOrganisationId = event.optString(\\\"organisation_id\\\")\\n",
+    "Bind upload to event organization"
+)
+replace_once(
+    "enabled = !working && !verifiedOrganisationId.isNullOrBlank(),",
+    "enabled = !working && event.optString(\\\"organisation_id\\\").isNotBlank() && event.optString(\\\"organisation_id\\\") != \\"null\\",",
+    "Enable only events with an organization ID"
+)
+
+source = organizer.read_text()
     count = source.count(old)
     if count != 1:
         raise SystemExit(f"{label}: expected exactly one source anchor; found {count}")
