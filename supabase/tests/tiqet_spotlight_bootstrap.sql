@@ -74,6 +74,7 @@ create table public.ticket_types (
   sales_start timestamptz,
   sales_end timestamptz
 );
+grant select on public.events, public.organisations to authenticated;
 create or replace function public.is_tiqet_admin() returns boolean language sql stable as $$
   select auth.uid() is not null
 $$;
