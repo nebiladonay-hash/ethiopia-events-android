@@ -16,20 +16,39 @@ on conflict (id) do update set
   file_size_limit = excluded.file_size_limit,
   allowed_mime_types = excluded.allowed_mime_types;
 
+create or replace function public.can_upload_tiqet_event_banner(
+  p_organisation_id uuid,
+  p_event_id uuid
+) returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $function$
+  select exists (
+    select 1
+    from public.events e
+    join public.organisations o on o.id = e.organisation_id
+    where e.id = p_event_id
+      and o.id = p_organisation_id
+      and o.owner_id = auth.uid()
+      and o.status = 'verified'::public.organisation_status
+  );
+$function$;
+
+revoke all on function public.can_upload_tiqet_event_banner(uuid,uuid) from public, anon;
+grant execute on function public.can_upload_tiqet_event_banner(uuid,uuid) to authenticated, service_role;
+
+
 drop policy if exists tiqet_event_banners_owner_insert on storage.objects;
 create policy tiqet_event_banners_owner_insert
 on storage.objects for insert to authenticated
 with check (
   bucket_id = 'tiqet-event-banners'
   and coalesce(array_length(storage.foldername(name), 1), 0) >= 2
-  and exists (
-    select 1
-    from public.events e
-    join public.organisations o on o.id = e.organisation_id
-    where e.id::text = (storage.foldername(name))[2]
-      and o.id::text = (storage.foldername(name))[1]
-      and o.owner_id = (select auth.uid())
-      and o.status = 'verified'::public.organisation_status
+  and public.can_upload_tiqet_event_banner(
+    (storage.foldername(name))[1]::uuid,
+    (storage.foldername(name))[2]::uuid
   )
 );
 
@@ -39,27 +58,17 @@ on storage.objects for update to authenticated
 using (
   bucket_id = 'tiqet-event-banners'
   and coalesce(array_length(storage.foldername(name), 1), 0) >= 2
-  and exists (
-    select 1
-    from public.events e
-    join public.organisations o on o.id = e.organisation_id
-    where e.id::text = (storage.foldername(name))[2]
-      and o.id::text = (storage.foldername(name))[1]
-      and o.owner_id = (select auth.uid())
-      and o.status = 'verified'::public.organisation_status
+  and public.can_upload_tiqet_event_banner(
+    (storage.foldername(name))[1]::uuid,
+    (storage.foldername(name))[2]::uuid
   )
 )
 with check (
   bucket_id = 'tiqet-event-banners'
   and coalesce(array_length(storage.foldername(name), 1), 0) >= 2
-  and exists (
-    select 1
-    from public.events e
-    join public.organisations o on o.id = e.organisation_id
-    where e.id::text = (storage.foldername(name))[2]
-      and o.id::text = (storage.foldername(name))[1]
-      and o.owner_id = (select auth.uid())
-      and o.status = 'verified'::public.organisation_status
+  and public.can_upload_tiqet_event_banner(
+    (storage.foldername(name))[1]::uuid,
+    (storage.foldername(name))[2]::uuid
   )
 );
 
@@ -69,14 +78,9 @@ on storage.objects for delete to authenticated
 using (
   bucket_id = 'tiqet-event-banners'
   and coalesce(array_length(storage.foldername(name), 1), 0) >= 2
-  and exists (
-    select 1
-    from public.events e
-    join public.organisations o on o.id = e.organisation_id
-    where e.id::text = (storage.foldername(name))[2]
-      and o.id::text = (storage.foldername(name))[1]
-      and o.owner_id = (select auth.uid())
-      and o.status = 'verified'::public.organisation_status
+  and public.can_upload_tiqet_event_banner(
+    (storage.foldername(name))[1]::uuid,
+    (storage.foldername(name))[2]::uuid
   )
 );
 
