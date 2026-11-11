@@ -139,17 +139,41 @@ auth_path = root / "app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
 organiser_path = root / "app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
 
 auth = auth_path.read_text()
+for import_line, new_line in (
+    ("import androidx.compose.foundation.layout.height\n", "import androidx.compose.foundation.layout.height\nimport androidx.compose.foundation.layout.heightIn\n"),
+    ("import androidx.compose.foundation.layout.padding\n", "import androidx.compose.foundation.layout.padding\nimport androidx.compose.foundation.rememberScrollState\nimport androidx.compose.foundation.verticalScroll\n"),
+):
+    if import_line not in auth:
+        raise SystemExit(f"Auth layout import anchor missing: {import_line.strip()}")
+    if new_line not in auth:
+        auth = auth.replace(import_line, new_line, 1)
+
 auth = make_header_full_bleed(
     auth,
     "fun TiqetAuthScreen",
     "horizontal = 24.dp, vertical = 20.dp",
     remove_root_padding=".padding(horizontal = 24.dp, vertical = 26.dp)",
 )
-# The outer screen now owns vertical scrolling; the content below the header is top-aligned.
+# Keep the red wave at the top; centre the sign-up/login card beneath it.
 auth = auth.replace(
-    "verticalArrangement = Arrangement.Center",
-    "verticalArrangement = Arrangement.Top",
+    ".background(AuthIvory)",
+    ".background(AuthIvory).verticalScroll(rememberScrollState())",
     1,
+)
+old_body = "Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp)) {"
+new_body = """Column(
+            modifier = Modifier.fillMaxWidth()
+                .heightIn(min = 560.dp)
+                .padding(horizontal = 24.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.Center
+        ) {"""
+if auth.count(old_body) != 1:
+    raise SystemExit(f"Auth body column anchor expected once; found {auth.count(old_body)}")
+auth = auth.replace(old_body, new_body, 1)
+auth = auth.replace(
+    "Create an organiser account. Publishing requires verification.",
+    "Publish events straight away. Connect a settlement account to sell paid tickets.",
+    1
 )
 auth_path.write_text(auth)
 
