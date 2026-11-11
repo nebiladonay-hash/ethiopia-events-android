@@ -125,6 +125,12 @@ class SupabaseApi(
     suspend fun getRefundsDashboard(session: ControlSession, limit: Int = 50): JSONObject =
         rpc(session, "get_tiqet_refunds_dashboard", JSONObject().put("p_limit", limit))
 
+    suspend fun getPlatformRevenueSummary(session: ControlSession): JSONObject = withContext(Dispatchers.IO) {
+        val result = request("GET", "/functions/v1/platform-revenue-summary", session = session)
+        if (!result.optBoolean("is_owner")) throw ApiException("Platform-owner access required.")
+        result
+    }
+
     suspend fun getChapaPayoutDestinations(session: ControlSession): JSONArray = withContext(Dispatchers.IO) {
         val result = request("GET", "/functions/v1/chapa-payout-banks", session = session)
         result.optJSONArray("destinations")
