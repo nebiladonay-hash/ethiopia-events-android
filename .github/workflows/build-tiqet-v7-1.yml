@@ -5,11 +5,17 @@ on:
   push:
     branches:
       - v7.1-integration
+      - tiqet-spotlight-discovery
     paths:
       - 'Tiqet_Android_V7_1.zip'
       - 'supabase/functions/**'
       - 'supabase/migrations/**'
       - 'patches/v7-2-payment-methods-api.patch'
+      - 'patches/tiqet-spotlight-discovery.patch.gz.b64'
+      - 'supabase/migrations/20261111103000_tiqet_spotlight_events.sql'
+      - 'supabase/migrations/20261111110000_tiqet_organizer_event_banners.sql'
+      - 'supabase/tests/tiqet_spotlight_*'
+      - '.github/workflows/test-tiqet-spotlight.yml'
       - 'patches/v7-2-minimal-ui.patch.gz.b64'
       - 'patches/v7-2-wave-ui.patch.gz.b64'
       - 'patches/v7-2-wave-finish.patch.gz.b64'
@@ -185,6 +191,20 @@ jobs:
           print("Exact previous cream-ticket/burgundy-T launcher restored; only artwork scale reduced to 72%.")
           PY
 
+      - name: Apply Spotlight, Boxing Matches and organizer-owned banner UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode "$GITHUB_WORKSPACE/patches/tiqet-spotlight-discovery.patch.gz.b64" \
+            | gzip -dc \
+            | patch -d "$PROJECT_DIR" -p1 --forward --batch
+          grep -q 'Boxing Matches' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
+          grep -q 'Tiqet Spotlight' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
+          grep -q 'Icons.Outlined.Explore' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
+          grep -q 'fetchSpotlightEvents' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
+          grep -q 'uploadEventBanner' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
+          grep -q 'set_organiser_event_banner' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
+          echo "Spotlight, Boxing Matches, minimalist navigation and organizer-owned banners applied."
       - name: Overlay canonical deployed Edge Function source
         shell: bash
         run: |
