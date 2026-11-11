@@ -137,7 +137,9 @@ Deno.serve(async (req) => {
     subaccounts: [{
       subaccount_reference: organiserAccountReference,
       split_type: 'flat',
-      split_value: organiserSplitMinor,
+      // Chapa v2 flat split_value is expressed in currency units (ETB), not integer cents.
+      // The payment amount itself remains integer cents.
+      split_value: organiserNetEtb,
     }],
   }
   if (preferredMethods) checkoutBody.preferred_payment_methods = preferredMethods
