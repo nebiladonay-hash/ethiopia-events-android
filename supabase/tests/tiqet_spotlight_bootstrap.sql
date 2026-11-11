@@ -41,7 +41,7 @@ grant select, insert, update, delete on storage.objects to authenticated, servic
 grant select, insert, update, delete on storage.buckets to service_role;
 
 create type public.event_status as enum ('draft','submitted','published','cancelled');
-create type public.organisation_status as enum ('pending','verified','rejected');
+create type public.organisation_status as enum ('pending','verified','rejected','suspended');
 create table public.organisations (
   id uuid primary key,
   owner_id uuid not null,
