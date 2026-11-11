@@ -15,6 +15,7 @@ on:
       - 'scripts/add-organizer-category-shortcuts.py'
       - 'scripts/remove-platform-revenue-from-organizer.py'
       - 'scripts/fix-tiqet-wave-header-layout.py'
+      - 'scripts/simplify-tiqet-event-creation.py'
       - 'supabase/migrations/20261111103000_tiqet_spotlight_events.sql'
       - 'supabase/migrations/20261111110000_tiqet_organizer_event_banners.sql'
       - 'supabase/tests/tiqet_spotlight_*'
@@ -202,11 +203,19 @@ jobs:
           python3 "$GITHUB_WORKSPACE/scripts/add-organizer-category-shortcuts.py" "$PROJECT_DIR"
           python3 "$GITHUB_WORKSPACE/scripts/remove-platform-revenue-from-organizer.py" "$PROJECT_DIR"
           python3 "$GITHUB_WORKSPACE/scripts/fix-tiqet-wave-header-layout.py" "$PROJECT_DIR"
+          python3 "$GITHUB_WORKSPACE/scripts/simplify-tiqet-event-creation.py" "$PROJECT_DIR"
+          grep -q 'Publish event now' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
+          grep -q 'create_event_with_ticket_options' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
+          grep -q 'fitTiqetEventBanner' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
+          ! grep -q 'approval_status=eq.approved' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
+          grep -q 'VVIP' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
           ! grep -q 'TIQET PLATFORM REVENUE' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
           ! grep -q 'fetchPlatformRevenueSummary' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
           grep -q 'TiqetWaveHeader' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
           grep -q 'padding(horizontal = 24.dp, vertical = 20.dp)' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
           grep -q 'padding(horizontal = 21.dp)' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
+          grep -q 'verticalArrangement = Arrangement.Center' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
+          ! grep -q 'Publishing requires verification' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
           ! grep -q 'fetchPlatformRevenueSummary' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
           ! grep -q 'withdrawPlatformRevenue' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
           grep -q 'Boxing Matches' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
