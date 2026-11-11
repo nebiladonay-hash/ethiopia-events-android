@@ -590,5 +590,9 @@ grant execute on function public.set_organiser_event_banner(uuid,text) to authen
 
 -- Remove the old admin RPC that required approve/reject/request-changes decisions.
 drop function if exists public.review_event_submission(uuid,text,text);
+-- Remove the now-obsolete trusted-organiser auto-publish controls. Every non-suspended
+-- organiser publishes immediately, so this trust toggle no longer changes event visibility.
+drop function if exists public.set_organiser_auto_publish(uuid,boolean,text);
+drop function if exists public.get_tiqet_verified_organisers();
 
 commit;
