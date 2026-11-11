@@ -16,6 +16,7 @@ on:
       - 'scripts/remove-platform-revenue-from-organizer.py'
       - 'scripts/fix-tiqet-wave-header-layout.py'
       - 'scripts/simplify-tiqet-event-creation.py'
+      - 'scripts/harden-tiqet-network-errors.py'
       - 'supabase/migrations/20261111103000_tiqet_spotlight_events.sql'
       - 'supabase/migrations/20261111110000_tiqet_organizer_event_banners.sql'
       - 'supabase/tests/tiqet_spotlight_*'
@@ -204,6 +205,7 @@ jobs:
           python3 "$GITHUB_WORKSPACE/scripts/remove-platform-revenue-from-organizer.py" "$PROJECT_DIR"
           python3 "$GITHUB_WORKSPACE/scripts/fix-tiqet-wave-header-layout.py" "$PROJECT_DIR"
           python3 "$GITHUB_WORKSPACE/scripts/simplify-tiqet-event-creation.py" "$PROJECT_DIR"
+          python3 "$GITHUB_WORKSPACE/scripts/harden-tiqet-network-errors.py" "$PROJECT_DIR"
           grep -q 'Publish event now' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
           grep -q 'create_event_with_ticket_options' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
           grep -q 'fitTiqetEventBanner' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
@@ -220,6 +222,8 @@ jobs:
           ! grep -q 'withdrawPlatformRevenue' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
           grep -q 'Boxing Matches' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
           grep -q 'Tiqet Spotlight' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
+          grep -q 'userFacingError' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
+          grep -q 'onRetry' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
           grep -q 'Icons.Outlined.Explore' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
           grep -q 'fetchSpotlightEvents' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
           grep -q 'uploadEventBanner' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
