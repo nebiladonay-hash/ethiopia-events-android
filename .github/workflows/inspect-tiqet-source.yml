@@ -29,10 +29,16 @@ jobs:
           find "$RUNNER_TEMP/tiqet" -type f \( -name 'MainActivity.kt' -o -name 'TiqetApi.kt' -o -name 'AndroidManifest.xml' \) -print
           MAIN="$(find "$RUNNER_TEMP/tiqet" -path '*/app/src/main/java/et/events/mobile/MainActivity.kt' -print -quit)"
           API="$(find "$RUNNER_TEMP/tiqet" -path '*/app/src/main/java/et/events/mobile/backend/TiqetApi.kt' -print -quit)"
+          ORGANIZER="$(find "$RUNNER_TEMP/tiqet" -path '*/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt' -print -quit)"
+          AUTH="$(find "$RUNNER_TEMP/tiqet" -path '*/app/src/main/java/et/events/mobile/TiqetAuthScreen.kt' -print -quit)"
           test -n "$MAIN"
           test -n "$API"
+          test -n "$ORGANIZER"
+          test -n "$AUTH"
           cp "$MAIN" .build-inspection/MainActivity.kt
           cp "$API" .build-inspection/TiqetApi.kt
+          cp "$ORGANIZER" .build-inspection/TiqetOrganizerScreen.kt
+          cp "$AUTH" .build-inspection/TiqetAuthScreen.kt
           find "$RUNNER_TEMP/tiqet" -path '*/app/src/main/res/navigation/*' -type f -exec cp --parents {} .build-inspection/ \; || true
       - name: Commit inspection copies temporarily
         run: |
