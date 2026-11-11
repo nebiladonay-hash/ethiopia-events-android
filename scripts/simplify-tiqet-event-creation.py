@@ -338,6 +338,13 @@ replace_once(api,
     '"&status=eq.published&approval_status=eq.approved&order=starts_at.asc"',
     '"&status=eq.published&order=starts_at.asc"',
     "Remove event approval filter from public discovery")
+
+# Public event discovery must never depend on a stored user session. A stale access
+# token should not turn the public event feed into a Supabase 401 / empty home screen.
+replace_once(api,
+    'val rows = requestArray("GET", "/rest/v1/events?$query", useSession = currentSession() != null)',
+    'val rows = requestArray("GET", "/rest/v1/events?$query", useSession = false)',
+    "Use anonymous Supabase access for public event discovery")
 api_source = api.read_text()
 published_start = api_source.find("    fun fetchPublishedEvents(")
 spotlight_start = api_source.find("    fun fetchSpotlightEvents(", published_start + 1)
