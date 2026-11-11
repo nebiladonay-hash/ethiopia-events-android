@@ -189,7 +189,7 @@ private fun LoginScreen(
                                 api.getOverview(newSession)
                                 onSignedIn(newSession)
                             } catch (e: Exception) {
-                                error = e.message ?: "Sign-in failed."
+                                error = api.userFacingError(e, "Sign-in failed.")
                             } finally {
                                 busy = false
                             }
@@ -286,7 +286,7 @@ private fun ControlWorkspace(
                     staff = api.getStaffDirectory(session)
                 }
             } catch (e: Exception) {
-                error = e.message ?: "Unable to load Control data."
+                error = api.userFacingError(e, "Unable to load Control data.")
             } finally {
                 busy = false
             }
@@ -394,7 +394,7 @@ private fun ControlWorkspace(
                                     else -> "Information request recorded."
                                 }
                                 refresh()
-                            } catch (e: Exception) { error = e.message ?: "Could not review organiser." }
+                            } catch (e: Exception) { error = api.userFacingError(e, "Could not review organiser.") }
                             finally { busy = false }
                         }
                     }
@@ -410,7 +410,7 @@ private fun ControlWorkspace(
                                 api.flagPublishedEvent(session,id,reason)
                                 notice = "Published event removed from public listings and sent to moderator review."
                                 refresh()
-                            } catch (e: Exception) { error = e.message ?: "Could not flag event." }
+                            } catch (e: Exception) { error = api.userFacingError(e, "Could not flag event.") }
                             finally { busy = false }
                         }
                     },
@@ -423,7 +423,7 @@ private fun ControlWorkspace(
                                     else "Event removed from Tiqet Spotlight. Its organizer-owned banner remains unchanged."
                                 refresh()
                             } catch (e: Exception) {
-                                error = e.message ?: "Could not update Tiqet Spotlight."
+                                error = api.userFacingError(e, "Could not update Tiqet Spotlight.")
                             } finally { busy = false }
                         }
                     }
@@ -449,7 +449,7 @@ private fun ControlWorkspace(
                             try {
                                 payoutDestinations = api.getChapaPayoutDestinations(session)
                             } catch (e: Exception) {
-                                error = e.message ?: "Could not load Chapa payout destinations."
+                                error = api.userFacingError(e, "Could not load Chapa payout destinations.")
                             }
                         }
                     },
@@ -469,7 +469,7 @@ private fun ControlWorkspace(
                                     JSONObject().put("load_error", refreshError.message ?: "Revenue summary refresh failed.")
                                 }
                             } catch (e: Exception) {
-                                error = e.message ?: "Could not submit the platform withdrawal."
+                                error = api.userFacingError(e, "Could not submit the platform withdrawal.")
                                 try {
                                     finance = api.getFinanceDashboard(session)
                                     platformRevenue = api.getPlatformRevenueSummary(session)
@@ -491,7 +491,7 @@ private fun ControlWorkspace(
                                 finance = api.getFinanceDashboard(session)
                                 audit = api.getAuditLog(session)
                             } catch (e: Exception) {
-                                error = e.message ?: "Could not update organiser payout request."
+                                error = api.userFacingError(e, "Could not update organiser payout request.")
                                 try {
                                     finance = api.getFinanceDashboard(session)
                                     audit = api.getAuditLog(session)
@@ -511,7 +511,7 @@ private fun ControlWorkspace(
                                 finance = api.getFinanceDashboard(session)
                                 refundsDashboard = api.getRefundsDashboard(session)
                             } catch (e: Exception) {
-                                error = e.message ?: "Could not create the Chapa refund request."
+                                error = api.userFacingError(e, "Could not create the Chapa refund request.")
                                 // A timeout can still leave a saved submission_unknown operation.
                                 // Refresh so the operator can safely retry the same idempotency key.
                                 try {
@@ -534,7 +534,7 @@ private fun ControlWorkspace(
                                 finance = api.getFinanceDashboard(session)
                                 refundsDashboard = api.getRefundsDashboard(session)
                             } catch (e: Exception) {
-                                error = e.message ?: "Could not verify the Chapa refund."
+                                error = api.userFacingError(e, "Could not verify the Chapa refund.")
                                 // Keep pending/unknown verification states visible after provider outages.
                                 try {
                                     finance = api.getFinanceDashboard(session)
