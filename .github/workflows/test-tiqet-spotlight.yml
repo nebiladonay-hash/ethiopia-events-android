@@ -6,13 +6,17 @@ on:
     paths:
       - 'supabase/migrations/*tiqet_spotlight*'
       - 'supabase/migrations/*organizer_event_banners*'
+      - 'supabase/migrations/*instant_event_publish*'
       - 'supabase/tests/tiqet_spotlight_*'
+      - 'supabase/tests/tiqet_instant_publish_*'
       - '.github/workflows/test-tiqet-spotlight.yml'
   pull_request:
     paths:
       - 'supabase/migrations/*tiqet_spotlight*'
       - 'supabase/migrations/*organizer_event_banners*'
+      - 'supabase/migrations/*instant_event_publish*'
       - 'supabase/tests/tiqet_spotlight_*'
+      - 'supabase/tests/tiqet_instant_publish_*'
 
 permissions:
   contents: read
@@ -48,5 +52,9 @@ jobs:
         run: psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261111103000_tiqet_spotlight_events.sql
       - name: Apply organizer-owned banner migration
         run: psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261111110000_tiqet_organizer_event_banners.sql
+      - name: Apply instant-publish and ticket-tier migration
+        run: psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261111114500_tiqet_instant_event_publish_and_ticket_tiers.sql
       - name: Test Spotlight, organizer ownership and event artwork
         run: psql -v ON_ERROR_STOP=1 -f supabase/tests/tiqet_spotlight_events.test.sql
+      - name: Test instant event publishing and ticket tiers
+        run: psql -v ON_ERROR_STOP=1 -f supabase/tests/tiqet_instant_publish_and_ticket_tiers.test.sql
