@@ -244,6 +244,7 @@ private fun ControlWorkspace(
     var audit by remember { mutableStateOf(JSONArray()) }
     var finance by remember { mutableStateOf(JSONObject()) }
     var refundsDashboard by remember { mutableStateOf(JSONObject()) }
+    var platformRevenue by remember { mutableStateOf(JSONObject()) }
     var payoutDestinations by remember { mutableStateOf(JSONArray()) }
     var selectedTab by remember { mutableStateOf(ControlTab.OVERVIEW) }
     var busy by remember { mutableStateOf(false) }
@@ -269,6 +270,21 @@ private fun ControlWorkspace(
                     audit = api.getAuditLog(session)
                     finance = api.getFinanceDashboard(session)
                     refundsDashboard = api.getRefundsDashboard(session)
+                    if (session.isPlatformOwner) {
+                        platformRevenue = try {
+                            api.getPlatformRevenueSummary(session)
+                        } catch (e: Exception) {
+                            JSONObject().put("load_error", e.message ?: "Could not load TIQET platform revenue.")
+                        }
+                        payoutDestinations = try {
+                            api.getChapaPayoutDestinations(session)
+                        } catch (_: Exception) {
+                            JSONArray()
+                        }
+                    } else {
+                        platformRevenue = JSONObject()
+                        payoutDestinations = JSONArray()
+                    }
                 }
                 if (overview.optBoolean("super_admin_access")) {
                     staff = api.getStaffDirectory(session)
@@ -452,6 +468,7 @@ private fun ControlWorkspace(
                 ControlTab.FINANCE -> FinanceScreen(
                     finance = finance,
                     refundsDashboard = refundsDashboard,
+                    platformRevenue = platformRevenue,
                     busy = busy,
                     isPlatformOwner = session.isPlatformOwner,
                     payoutDestinations = payoutDestinations,
@@ -472,11 +489,19 @@ private fun ControlWorkspace(
                                 val result = api.createPlatformPayout(
                                     session, amountMinor, bankSlug, bankName, accountName, accountNumber
                                 )
-                                notice = "Platform withdrawal recorded with Chapa status ${result.optString("status", "pending")}. It remains under reconciliation until final confirmation."
+                                notice = "TIQET platform withdrawal recorded with Chapa status ${result.optString("status", "pending")}. It remains under reconciliation until final confirmation."
                                 finance = api.getFinanceDashboard(session)
+                                platformRevenue = try {
+                                    api.getPlatformRevenueSummary(session)
+                                } catch (refreshError: Exception) {
+                                    JSONObject().put("load_error", refreshError.message ?: "Revenue summary refresh failed.")
+                                }
                             } catch (e: Exception) {
                                 error = e.message ?: "Could not submit the platform withdrawal."
-                                try { finance = api.getFinanceDashboard(session) } catch (_: Exception) { }
+                                try {
+                                    finance = api.getFinanceDashboard(session)
+                                    platformRevenue = api.getPlatformRevenueSummary(session)
+                                } catch (_: Exception) { }
                             } finally {
                                 busy = false
                             }
@@ -1511,6 +1536,7 @@ private fun UserModerationScreen(
 private fun FinanceScreen(
     finance: JSONObject,
     refundsDashboard: JSONObject,
+    platformRevenue: JSONObject,
     busy: Boolean,
     isPlatformOwner: Boolean,
     payoutDestinations: JSONArray,
@@ -1552,6 +1578,16 @@ private fun FinanceScreen(
     fun amount(row: JSONObject, key: String = "amount_minor"): String =
         money(row.optLong(key).toDouble() / 100.0)
 
+    fun openPlatformWithdrawal() {
+        payoutAmountEtb = ""
+        payoutAccountName = ""
+        payoutAccountNumber = ""
+        selectedDestinationSlug = ""
+        payoutFormError = null
+        showPayoutDialog = true
+        onLoadPayoutDestinations()
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start=16.dp,end=16.dp,top=15.dp,bottom=28.dp),
@@ -1567,6 +1603,56 @@ private fun FinanceScreen(
                 if (busy) {
                     Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(Modifier.fillMaxWidth(),color=Teal)
+                }
+            }
+        }
+        if (isPlatformOwner) {
+            item {
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(CardWhite).padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("TIQET PLATFORM REVENUE",color=Teal,fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.2.sp)
+                    if (platformRevenue.optBoolean("is_owner")) {
+                        Text(
+                            money(platformRevenue.optDouble("ledger_available_etb")),
+                            color=Ink,
+                            fontSize=27.sp,
+                            fontWeight=FontWeight.Bold
+                        )
+                        Text(
+                            "Ledger amount available before payment fees, taxes, refunds, disputes and operating costs.",
+                            color=Muted,fontSize=10.sp,lineHeight=14.sp
+                        )
+                        Text("Gross Tiqet revenue: ${money(platformRevenue.optDouble("gross_platform_revenue_etb"))}",color=Ink,fontSize=11.sp)
+                        Text("Successfully withdrawn: ${money(platformRevenue.optDouble("total_successful_withdrawals_etb"))}",color=Muted,fontSize=11.sp)
+                        Text("Successful payout fees: ${money(platformRevenue.optDouble("successful_payout_fees_etb"))}",color=Muted,fontSize=11.sp)
+                        val activeDestinations = (0 until payoutDestinations.length()).mapNotNull { i ->
+                            payoutDestinations.optJSONObject(i)?.let { "${it.optString("name")} (${it.optString("slug")})" }
+                        }.joinToString(" · ")
+                        Text(
+                            "Active payout destinations: " + activeDestinations.ifBlank { "Not available" },
+                            color=Muted,fontSize=10.sp,lineHeight=14.sp
+                        )
+                        if (platformRevenue.optString("note").isNotBlank()) {
+                            Text(platformRevenue.optString("note"),color=Muted,fontSize=9.sp,lineHeight=13.sp)
+                        }
+                    } else {
+                        Text(
+                            platformRevenue.optString("load_error").ifBlank { "TIQET platform revenue summary is not available." },
+                            color=Danger,fontSize=11.sp,lineHeight=15.sp
+                        )
+                    }
+                    Text(
+                        "This balance belongs to TIQET. Organisers' ticket earnings and settlement balances are separate.",
+                        color=Teal,fontSize=10.sp,lineHeight=14.sp,fontWeight=FontWeight.SemiBold
+                    )
+                    Button(
+                        onClick = { openPlatformWithdrawal() },
+                        enabled = !busy && platformRevenue.optBoolean("is_owner"),
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor=Ink)
+                    ) { Text("Withdraw TIQET revenue") }
                 }
             }
         }
@@ -1695,23 +1781,7 @@ private fun FinanceScreen(
             Row(verticalAlignment=Alignment.CenterVertically) {
                 Text("Platform withdrawals",color=Ink,fontSize=13.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
                 Text(platformPayouts.length().toString(),color=Muted,fontSize=10.sp)
-                if (isPlatformOwner) {
-                    Spacer(Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            payoutAmountEtb = ""
-                            payoutAccountName = ""
-                            payoutAccountNumber = ""
-                            selectedDestinationSlug = ""
-                            payoutFormError = null
-                            showPayoutDialog = true
-                            onLoadPayoutDestinations()
-                        },
-                        enabled = !busy,
-                        contentPadding = PaddingValues(horizontal=10.dp, vertical=6.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor=Ink)
-                    ) { Text("Withdraw",fontSize=10.sp) }
-                }
+                
             }
         }
         if (isPlatformOwner) {
