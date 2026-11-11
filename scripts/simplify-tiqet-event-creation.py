@@ -615,15 +615,59 @@ new_ticket_block = """        val chosenTicket = selectedTicketOption ?: event.t
             Text("+", color = BrandRed, fontSize = 23.sp, modifier = Modifier.clickable { if (ticketCount < 10) ticketCount++ }.padding(horizontal = 10.dp))
         }"""
 main_source = main.read_text()
-if main_source.count(old_ticket_block) != 1:
-    detail_start = main_source.find("private fun EventDetailScreen(")
-    snippet = main_source[detail_start:detail_start + 11000]
-    raise SystemExit(
-        "Ticket block did not match after Tiqet visual patches. Event detail source follows:\\n" + snippet
-    )
-replace_once(main, old_ticket_block, new_ticket_block, "Add selectable Regular VIP VVIP customer ticket options")
-replace_once(main, "val ticketSubtotal = event.price * ticketCount.toDouble()", "val ticketSubtotal = chosenTicketPrice * ticketCount.toDouble()", "Calculate selected tier total")
-replace_once(main, "                    val ticketTypeId = event.ticketTypeId", "                    val ticketTypeId = chosenTicketTypeId", "Checkout selected ticket tier")
-replace_once(main, "                                if (event.price == 0.0) {", "                                if (chosenTicketPrice == 0.0) {", "Use selected tier price for free or paid checkout")
+detail_start = main_source.find("private fun EventDetailScreen(")
+if detail_start < 0:
+    raise SystemExit("Could not find the event detail composable.")
+ticket_start = main_source.find(
+    '        Text("Tickets", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)',
+    detail_start
+)
+ticket_end = main_source.find('        if (event.price > 0.0) {', ticket_start)
+if ticket_start < 0 or ticket_end < 0:
+    raise SystemExit("Could not find the ticket selector and payment-method section in event details.")
+detail_region = main_source[detail_start:]
+if detail_region.count('        Text("Tickets", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)') != 1:
+    raise SystemExit("Expected one ticket selector inside the event detail screen.")
+main_source = main_source[:ticket_start] + new_ticket_block + "\\n" + main_source[ticket_end:]
+
+# A paid VIP/VVIP ticket may exist even when the Regular ticket is free. Load payment methods
+# and show their picker whenever any available tier is paid.
+detail_start = main_source.find("private fun EventDetailScreen(")
+detail_end = main_source.find("\\n@Composable", detail_start + 1)
+if detail_end < 0:
+    detail_end = len(main_source)
+detail_region = main_source[detail_start:detail_end]
+detail_region = detail_region.replace(
+    "LaunchedEffect(event.id, event.price, api)",
+    "LaunchedEffect(event.id, event.price, event.ticketOptions, api)",
+    1
+)
+detail_region = detail_region.replace(
+    "if (event.price > 0.0) {",
+    "if (event.ticketOptions.any { it.priceEtb > 0.0 } || event.price > 0.0) {",
+    2
+)
+detail_region = detail_region.replace(
+    "val ticketSubtotal = event.price * ticketCount.toDouble()",
+    "val ticketSubtotal = chosenTicketPrice * ticketCount.toDouble()",
+    1
+)
+detail_region = detail_region.replace(
+    "val ticketTypeId = event.ticketTypeId",
+    "val ticketTypeId = chosenTicketTypeId",
+    1
+)
+detail_region = detail_region.replace(
+    "if (event.price == 0.0) {",
+    "if (chosenTicketPrice == 0.0) {",
+    1
+)
+for old_anchor in ("val ticketSubtotal = event.price * ticketCount.toDouble()", "val ticketTypeId = event.ticketTypeId", "if (event.price == 0.0) {"):
+    if old_anchor in detail_region:
+        raise SystemExit(f"Selected ticket tier patch did not replace: {old_anchor}")
+# Scrollable detail should keep its checkout row after the ticket tiers, not force it to the bottom.
+detail_region = detail_region.replace("Spacer(Modifier.weight(1f))", "Spacer(Modifier.height(16.dp))", 1)
+main_source = main_source[:detail_start] + detail_region + main_source[detail_end:]
+main.write_text(main_source)
 
 print("Applied instant publishing, simplified organiser form, automatic landscape banner fitting, Regular/VIP/VVIP ticket creation and customer tier selection.")
