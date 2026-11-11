@@ -388,7 +388,7 @@ begin
             and (tt.sales_start is null or tt.sales_start <= now())
             and (tt.sales_end is null or tt.sales_end > now())
         ), '[]'::jsonb)
-      ) as item, e.starts_at
+      ) as item
     from public.tiqet_event_spotlight s
     join public.events e on e.id = s.event_id
     join public.organisations o on o.id = e.organisation_id
