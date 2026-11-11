@@ -34,10 +34,6 @@ replace_once(organizer,
     "import com.journeyapps.barcodescanner.ScanOptions\nimport android.net.Uri\n",
     "Organizer image Uri import")
 replace_once(organizer,
-    "import androidx.activity.compose.rememberLauncherForActivityResult\n",
-    "import androidx.activity.compose.rememberLauncherForActivityResult\nimport androidx.activity.result.contract.ActivityResultContracts\n",
-    "Organizer content picker import")
-replace_once(organizer,
     "    val verifiedOrganisationId = if (organisationStatus == \"verified\") organisation?.optString(\"id\") else null\n",
     "    val verifiedOrganisationId = if (organisationStatus == \"verified\") organisation?.optString(\"id\") else null\n"
     "    val eventOrganisationId = organisation?.optString(\"id\")?.takeIf { it.isNotBlank() && it != \"null\" }\n",
