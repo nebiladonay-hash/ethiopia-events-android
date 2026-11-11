@@ -152,25 +152,30 @@ main_replace(
     '    loadError: String,\n    onRetry: () -> Unit,\n    onSearchChange: (String) -> Unit,',
     "DiscoverScreen retry signature"
 )
-main_replace(
-    '            } else if (filtered.isEmpty()) {\n                EmptyMessage(if (loadError.isNotBlank()) "Events could not be loaded: $loadError" else "No published events are available yet.")\n            } else {',
-    '''            } else if (filtered.isEmpty()) {
-                if (loadError.isNotBlank()) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
-                            .background(SoftIvory).border(1.dp, Hairline, RoundedCornerShape(16.dp)).padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(9.dp)
-                    ) {
-                        Text("Couldn't load events", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        Text(loadError, color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
-                        RedActionButton("Try again", onRetry, Modifier.width(145.dp))
-                    }
-                } else {
-                    EmptyMessage("No published events are available yet.")
-                }
-            } else {''',
-    "Replace raw Discover error state with retry card"
-)
+discover_lines = main.splitlines()
+error_lines = [i for i, line in enumerate(discover_lines) if "EmptyMessage(if (loadError" in line]
+if len(error_lines) != 1:
+    nearby = [line for line in discover_lines if "loadError" in line or "filtered.isEmpty" in line]
+    raise SystemExit(f"Discover error row expected once; found {len(error_lines)}. Nearby rows: {nearby}")
+error_index = error_lines[0]
+indent = discover_lines[error_index][:len(discover_lines[error_index]) - len(discover_lines[error_index].lstrip())]
+discover_lines[error_index] = indent + 'if (loadError.isNotBlank()) {'
+discover_block = [
+    indent + '    Column(',
+    indent + '        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))',
+    indent + '            .background(SoftIvory).border(1.dp, Hairline, RoundedCornerShape(16.dp)).padding(18.dp),',
+    indent + '        verticalArrangement = Arrangement.spacedBy(9.dp)',
+    indent + '    ) {',
+    indent + '        Text("Couldn\'t load events", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)',
+    indent + '        Text(loadError, color = Muted, fontSize = 12.sp, lineHeight = 17.sp)',
+    indent + '        RedActionButton("Try again", onRetry, Modifier.width(145.dp))',
+    indent + '    }',
+    indent + '} else {',
+    indent + '    EmptyMessage("No published events are available yet.")',
+    indent + '}',
+]
+discover_lines[error_index + 1:error_index + 1] = discover_block
+main = "\n".join(discover_lines) + "\n"
 main_replace(
     '    var tickets by remember { mutableStateOf(emptyList<TiqetApi.Ticket>()) }\n    var loading by remember { mutableStateOf(true) }\n    var problem by remember { mutableStateOf("") }\n    LaunchedEffect(api) {\n        try {',
     '    var tickets by remember { mutableStateOf(emptyList<TiqetApi.Ticket>()) }\n    var loading by remember { mutableStateOf(true) }\n    var problem by remember { mutableStateOf("") }\n    var ticketReloadKey by remember { mutableStateOf(0) }\n    LaunchedEffect(api, ticketReloadKey) {\n        loading = true\n        problem = ""\n        try {',
