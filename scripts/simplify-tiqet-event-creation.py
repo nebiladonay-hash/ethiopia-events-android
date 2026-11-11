@@ -550,6 +550,31 @@ new_hero = """        if (!event.imageUrl.isNullOrBlank()) {
             }
         }"""
 replace_once(main, old_hero, new_hero, "Show uploaded event poster on event detail page")
+replace_once(
+    main,
+    """    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BrandIvory)
+            .padding(horizontal = 21.dp)
+    ) {
+        Spacer(Modifier.height(15.dp))""",
+    """    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BrandIvory)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 21.dp)
+    ) {
+        Spacer(Modifier.height(15.dp))""",
+    "Allow event details with multiple ticket tiers to scroll"
+)
+replace_once(
+    main,
+    "        Spacer(Modifier.weight(1f))\n        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {",
+    "        Spacer(Modifier.height(16.dp))\n        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {",
+    "Keep checkout controls in the scrollable event detail"
+)
 
 old_ticket_block = """        Text("Tickets", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(10.dp))
