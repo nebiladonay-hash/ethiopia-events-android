@@ -31,11 +31,11 @@ on public.events for insert to authenticated
 with check (
   created_by = (select auth.uid())
   and status in ('draft'::public.event_status, 'published'::public.event_status)
-  and approval_status = 'approved'
   and exists (
     select 1 from public.organisations o
     where o.id = events.organisation_id
       and o.owner_id = (select auth.uid())
+      and o.status <> 'suspended'::public.organisation_status
   )
 );
 
@@ -48,16 +48,17 @@ using (
     select 1 from public.organisations o
     where o.id = events.organisation_id
       and o.owner_id = (select auth.uid())
+      and o.status <> 'suspended'::public.organisation_status
   )
 )
 with check (
   created_by = (select auth.uid())
   and status in ('draft'::public.event_status, 'published'::public.event_status)
-  and approval_status = 'approved'
   and exists (
     select 1 from public.organisations o
     where o.id = events.organisation_id
       and o.owner_id = (select auth.uid())
+      and o.status <> 'suspended'::public.organisation_status
   )
 );
 
@@ -168,8 +169,9 @@ begin
     select 1 from public.organisations o
     where o.id = p_organisation_id
       and o.owner_id = v_user
+      and o.status <> 'suspended'::public.organisation_status
   ) then
-    raise exception 'Create your organiser profile before publishing an event';
+    raise exception 'Your organiser account is unavailable.';
   end if;
 
   if p_title is null or char_length(btrim(p_title)) not between 3 and 120 then
@@ -325,6 +327,7 @@ begin
   where e.id = p_event_id
     and e.created_by = v_user
     and o.owner_id = v_user
+    and o.status <> 'suspended'::public.organisation_status
   for update of e;
 
   if not found then raise exception 'Your event could not be found'; end if;
