@@ -22,6 +22,8 @@ Deno.serve(async (req) => {
   const chapaKey = Deno.env.get('CHAPA_PRIVATE_KEY')
   const chapaMode = Deno.env.get('CHAPA_MODE')?.toLowerCase()
   if (!chapaKey || !['test', 'live'].includes(chapaMode ?? '')) return json({ error: 'Set CHAPA_PRIVATE_KEY and CHAPA_MODE (test or live) in Supabase secrets' }, 503)
+  const keyMode = chapaKey.startsWith('CHAPA_TEST_') ? 'test' : chapaKey.startsWith('CHAPA_LIVE_') ? 'live' : null
+  if (keyMode && keyMode !== chapaMode) return json({ error: 'Chapa API key environment does not match CHAPA_MODE' }, 503)
   if (chapaMode === 'live' && Deno.env.get('TIQET_LIVE_MARKETPLACE_APPROVED') !== 'true') {
     return json({ error: 'Live checkout is locked until Tiqet has written marketplace approval and merchant activation from Chapa.' }, 403)
   }
@@ -49,8 +51,10 @@ Deno.serve(async (req) => {
   })
   if (holdError || !hold?.order_id) return json({ error: holdError?.message ?? 'Could not reserve tickets' }, 409)
 
-  const failHold = async (reason: string) => {
-    await admin.rpc('fail_order_payment', { p_order_id: hold.order_id, p_reason: reason })
+  const failHold = async (reason: string): Promise<boolean> => {
+    const { error } = await admin.rpc('fail_order_payment', { p_order_id: hold.order_id, p_reason: reason })
+    if (error) console.error('Could not release failed checkout hold', error.message)
+    return !error
   }
   const { data: item, error: itemError } = await admin
     .from('order_items').select('event_id').eq('order_id', hold.order_id).single()
@@ -89,10 +93,18 @@ Deno.serve(async (req) => {
 
   let preferredMethods: string[] | undefined
   if (body.payment_method) {
-    const methodsResponse = await fetch('https://api.chapa.global/v2/payments/methods', {
-      headers: { Authorization: `Bearer ${chapaKey}` },
-    })
-    const methodsJson = await methodsResponse.json().catch(() => ({}))
+    let methodsResponse: Response
+    let methodsJson: Record<string, any>
+    try {
+      methodsResponse = await fetch('https://api.chapa.global/v2/payments/methods', {
+        headers: { Authorization: `Bearer ${chapaKey}` },
+      })
+      methodsJson = await methodsResponse.json().catch(() => ({}))
+    } catch {
+      const released = await failHold('Could not reach Chapa to validate the selected payment method')
+      if (!released) return json({ error: 'Chapa is unreachable and TIQET could not confirm release of the ticket hold. Contact support before retrying.' }, 500)
+      return json({ error: 'Chapa is temporarily unreachable. Your ticket reservation was released; please try again.' }, 503)
+    }
     const methods = Array.isArray(methodsJson?.data) ? methodsJson.data : []
     const selected = methods.find((m: Record<string, any>) =>
       m.slug === body.payment_method && m.can_process_payments === true &&
@@ -125,7 +137,9 @@ Deno.serve(async (req) => {
     subaccounts: [{
       subaccount_reference: organiserAccountReference,
       split_type: 'flat',
-      split_value: organiserSplitMinor,
+      // Chapa v2 flat split_value is expressed in currency units (ETB), not integer cents.
+      // The payment amount itself remains integer cents.
+      split_value: organiserNetEtb,
     }],
   }
   if (preferredMethods) checkoutBody.preferred_payment_methods = preferredMethods
@@ -162,16 +176,31 @@ Deno.serve(async (req) => {
     if (eventError) console.error('Payment attempt audit event insert failed', eventError.message)
   }
 
-  const chapaResponse = await fetch('https://api.chapa.global/v2/payments/hosted', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${chapaKey}`,
-      'Content-Type': 'application/json',
-      'Idempotency-Key': hold.merchant_reference,
-    },
-    body: JSON.stringify(checkoutBody),
-  })
-  const chapa = await chapaResponse.json().catch(() => ({}))
+  let chapaResponse: Response
+  let chapa: Record<string, any>
+  try {
+    chapaResponse = await fetch('https://api.chapa.global/v2/payments/hosted', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${chapaKey}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': hold.merchant_reference,
+      },
+      body: JSON.stringify(checkoutBody),
+    })
+    chapa = await chapaResponse.json().catch(() => ({}))
+  } catch {
+    const released = await failHold('Chapa checkout initialization response was unavailable; order hold released for safety')
+    if (!released) return json({ error: 'Chapa did not respond and TIQET could not confirm release of the ticket hold. Contact support before retrying.' }, 500)
+    const { error: outcomeMetadataError } = await admin.from('payments').update({
+      failure_code: 'checkout_initialization_unknown',
+      failure_message: 'Chapa did not return a checkout response. The order hold was released; reconcile any late provider notification before issuing tickets.',
+      provider_payload: { checkout_initialization: 'unknown', merchant_reference: hold.merchant_reference },
+      updated_at: new Date().toISOString(),
+    }).eq('order_id', hold.order_id)
+    if (outcomeMetadataError) console.error('Could not persist uncertain checkout initialization metadata', outcomeMetadataError.message)
+    return json({ error: 'Chapa did not respond while creating checkout. Your ticket reservation was released; do not pay using an old checkout link. Please try again.' }, 503)
+  }
   const checkoutUrl = chapa?.data?.checkout_url
   if (!chapaResponse.ok || chapa?.status !== 'success' || !checkoutUrl) {
     await failHold(`Chapa initialization failed (${chapaResponse.status})`)
