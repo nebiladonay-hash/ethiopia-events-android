@@ -136,7 +136,7 @@ private fun SpotlightBannerCard(event: EventCardModel, onClick: () -> Unit) {
             Text(listOf(event.date, event.venue).filter { it.isNotBlank() }.joinToString(" · "), color = Color.White.copy(alpha = 0.9f), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Box(Modifier.align(Alignment.TopEnd).padding(12.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.93f)).padding(horizontal = 10.dp, vertical = 6.dp)) {
-            Text("VERIFIED EVENT", color = BrandRed, fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
+            Text("FEATURED", color = BrandRed, fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
         }
     }
 }
