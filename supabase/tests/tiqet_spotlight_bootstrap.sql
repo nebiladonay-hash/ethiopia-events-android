@@ -94,12 +94,12 @@ create policy organisations_read_owner
 on public.organisations for select to authenticated
 using (owner_id = (select auth.uid()));
 
-create or replace function public.is_tiqet_admin() returns boolean language sql stable as $
+create or replace function public.is_tiqet_admin() returns boolean language sql stable as $function$
   select auth.uid() is not null
-$;
-create or replace function public.is_tiqet_moderator() returns boolean language sql stable as $
+$function$;
+create or replace function public.is_tiqet_moderator() returns boolean language sql stable as $function$
   select auth.uid() is not null
-$;
+$function$;
 grant usage on schema public to anon, authenticated, service_role;
 grant execute on function public.is_tiqet_admin() to authenticated, service_role;
 grant execute on function public.is_tiqet_moderator() to authenticated, service_role;
