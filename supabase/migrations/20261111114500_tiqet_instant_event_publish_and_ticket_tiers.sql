@@ -588,4 +588,8 @@ $function$;
 revoke all on function public.set_organiser_event_banner(uuid,text) from public, anon;
 grant execute on function public.set_organiser_event_banner(uuid,text) to authenticated;
 
+-- Remove the old admin RPC that required approve/reject/request-changes decisions.
+revoke all on function public.review_event_submission(uuid,text,text) from public, anon, authenticated, service_role;
+drop function if exists public.review_event_submission(uuid,text,text);
+
 commit;
