@@ -1,0 +1,38 @@
+name: Inspect Tiqet V7.1 Android source
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  extract-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tiqet-spotlight-discovery
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract Android source for targeted review
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tiqet"
+          unzip -q Tiqet_Android_V7_1.zip -d "$RUNNER_TEMP/tiqet"
+          mkdir -p .build-inspection
+          find "$RUNNER_TEMP/tiqet" -type f \( -name 'MainActivity.kt' -o -name 'TiqetApi.kt' -o -name 'AndroidManifest.xml' \) -print
+          MAIN="$(find "$RUNNER_TEMP/tiqet" -path '*/app/src/main/java/et/events/mobile/MainActivity.kt' -print -quit)"
+          API="$(find "$RUNNER_TEMP/tiqet" -path '*/app/src/main/java/et/events/mobile/backend/TiqetApi.kt' -print -quit)"
+          test -n "$MAIN"
+          test -n "$API"
+          cp "$MAIN" .build-inspection/MainActivity.kt
+          cp "$API" .build-inspection/TiqetApi.kt
+          find "$RUNNER_TEMP/tiqet" -path '*/app/src/main/res/navigation/*' -type f -exec cp --parents {} .build-inspection/ \; || true
+      - name: Commit inspection copies temporarily
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .build-inspection
+          git commit -m "Temporarily expose packaged Tiqet source for review"
+          git push origin tiqet-spotlight-discovery
