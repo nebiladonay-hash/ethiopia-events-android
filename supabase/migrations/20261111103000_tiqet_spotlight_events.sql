@@ -59,6 +59,8 @@ begin
         'ticket_type_id', cheapest.id,
         'ticket_type_name', cheapest.name,
         'featured_label', s.featured_label,
+        'spotlight_sort_order', s.sort_order,
+        'spotlight_ends_at', s.ends_at,
         'ticket_types', coalesce((
           select jsonb_agg(
             jsonb_build_object('id', tt.id, 'name', tt.name, 'price_etb', tt.price_etb)
