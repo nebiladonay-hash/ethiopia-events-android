@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -32,9 +33,12 @@ import androidx.compose.ui.unit.sp
 import et.tiqet.control.data.ApiException
 import et.tiqet.control.data.ControlSession
 import et.tiqet.control.data.SupabaseApi
+import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.Duration
+import java.time.Instant
 import java.util.Locale
 
 private val Ink = Color(0xFF152C2A)
@@ -422,12 +426,12 @@ private fun ControlWorkspace(
                             finally { busy = false }
                         }
                     },
-                    onSetSpotlight = { id, featured ->
+                    onSetSpotlight = { id, featured, sortOrder, endsAt, label ->
                         scope.launch {
                             busy = true
                             try {
-                                api.setEventSpotlight(session, id, featured)
-                                notice = if (featured) "Event added to Tiqet Spotlight. Its organizer-owned banner remains unchanged."
+                                api.setEventSpotlight(session, id, featured, sortOrder, endsAt, label)
+                                notice = if (featured) "Tiqet Spotlight settings saved. The organizer-owned banner remains unchanged."
                                     else "Event removed from Tiqet Spotlight. Its organizer-owned banner remains unchanged."
                                 refresh()
                             } catch (e: Exception) {
@@ -844,14 +848,37 @@ private fun EventQueueScreen(
     busy: Boolean,
     onReview: (String, String, String) -> Unit,
     onFlagPublished: (String,String) -> Unit,
-    onSetSpotlight: (String, Boolean) -> Unit
+    onSetSpotlight: (String, Boolean, Int, String?, String) -> Unit
 ) {
     var notes by remember { mutableStateOf("") }
     var flagReason by remember { mutableStateOf("") }
     var selectedPublishedEvent by remember { mutableStateOf<JSONObject?>(null) }
     var showFlagConfirm by remember { mutableStateOf(false) }
-    val spotlightIds = remember(spotlightItems) {
-        (0 until spotlightItems.length()).mapNotNull { spotlightItems.optJSONObject(it)?.optString("id")?.takeIf { id -> id.isNotBlank() } }.toSet()
+    var selectedSpotlightEvent by remember { mutableStateOf<JSONObject?>(null) }
+    var showSpotlightDialog by remember { mutableStateOf(false) }
+    var spotlightSortOrder by remember { mutableStateOf("100") }
+    var spotlightLabel by remember { mutableStateOf("Tiqet Spotlight") }
+    var spotlightExpiryDays by remember { mutableStateOf(7) }
+    var spotlightExpiryExpanded by remember { mutableStateOf(false) }
+    val spotlightById = remember(spotlightItems) {
+        (0 until spotlightItems.length())
+            .mapNotNull { spotlightItems.optJSONObject(it) }
+            .filter { it.optString("id").isNotBlank() }
+            .associateBy { it.optString("id") }
+    }
+
+    fun openSpotlightSettings(event: JSONObject) {
+        val existing = spotlightById[event.optString("id")]
+        selectedSpotlightEvent = event
+        spotlightSortOrder = existing?.optInt("spotlight_sort_order", 100)?.toString() ?: "100"
+        spotlightLabel = existing?.optString("featured_label")?.takeIf { !it.isNullOrBlank() } ?: "Tiqet Spotlight"
+        spotlightExpiryDays = if (existing == null) {
+            7
+        } else {
+            spotlightExpiryPreset(existing.optString("spotlight_ends_at").takeIf { it.isNotBlank() })
+        }
+        spotlightExpiryExpanded = false
+        showSpotlightDialog = true
     }
 
     LazyColumn(
@@ -902,33 +929,78 @@ private fun EventQueueScreen(
             item { EmptyState("No published events","Published events will appear here for ongoing moderation.") }
         } else {
             items((0 until publishedItems.length()).mapNotNull{publishedItems.optJSONObject(it)},key={"published-${it.optString("id")}"}) { event ->
+                val eventId = event.optString("id")
+                val activeSpotlight = spotlightById[eventId]
+                val isFeatured = activeSpotlight != null
+                val eventBanner = event.optString("image_url")
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(CardWhite).padding(14.dp)) {
                     Text(event.optString("title","Untitled event"),color=Ink,fontSize=13.sp,fontWeight=FontWeight.Bold)
+                    if (eventBanner.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        AsyncImage(
+                            model = eventBanner,
+                            contentDescription = "Organizer-provided banner for ${event.optString("title")}",
+                            modifier = Modifier.fillMaxWidth().height(132.dp).clip(RoundedCornerShape(12.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Spacer(Modifier.height(6.dp))
+                        Text("No organizer banner uploaded",color=Muted,fontSize=10.sp)
+                    }
+                    Spacer(Modifier.height(5.dp))
                     Text("${event.optString("organisation_name")} · ${event.optString("category")}",color=Teal,fontSize=10.sp)
                     Text(listOf(event.optString("starts_at").replace("T"," ").take(16),event.optString("venue_name"),event.optString("city"))
                         .filter{it.isNotBlank()}.joinToString(" · "),color=Muted,fontSize=9.sp)
                     if(event.optString("description").isNotBlank()) {
                         Text(event.optString("description"),color=Ink,fontSize=11.sp,lineHeight=15.sp,maxLines=3,overflow=TextOverflow.Ellipsis)
                     }
-                    val isFeatured = spotlightIds.contains(event.optString("id"))
-                    if (isFeatured) {
+                    if (isFeatured && activeSpotlight != null) {
                         Spacer(Modifier.height(7.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             StatusPill("Spotlight")
                             Spacer(Modifier.width(8.dp))
                             Text("Curated placement is active", color = Teal, fontSize = 10.sp)
                         }
+                        val expiry = activeSpotlight.optString("spotlight_ends_at")
+                        Text(
+                            "Priority ${activeSpotlight.optInt("spotlight_sort_order", 100)} · " +
+                                if (expiry.isBlank()) "No automatic expiry" else "Ends ${expiry.replace("T", " ").take(16)} UTC",
+                            color = Muted,
+                            fontSize = 9.sp
+                        )
                     }
                     Spacer(Modifier.height(7.dp))
-                    OutlinedButton(
-                        onClick = { onSetSpotlight(event.optString("id"), !isFeatured) },
-                        enabled = !busy,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(11.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = if (isFeatured) Danger else Teal)
-                    ) { Text(if (isFeatured) "Remove from Tiqet Spotlight" else "Feature in Tiqet Spotlight", fontSize = 10.sp) }
+                    if (isFeatured) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(7.dp), modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(
+                                onClick = { openSpotlightSettings(event) },
+                                enabled = !busy,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(11.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Teal)
+                            ) { Text("Edit Spotlight", fontSize = 10.sp) }
+                            OutlinedButton(
+                                onClick = { onSetSpotlight(eventId, false, 100, null, "Tiqet Spotlight") },
+                                enabled = !busy,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(11.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger)
+                            ) { Text("Remove", fontSize = 10.sp) }
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { openSpotlightSettings(event) },
+                            enabled = !busy && eventBanner.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(11.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Teal)
+                        ) { Text("Feature in Tiqet Spotlight", fontSize = 10.sp) }
+                        if (eventBanner.isBlank()) {
+                            Text("The organizer must upload a banner before this event can be featured.", color = Muted, fontSize = 9.sp)
+                        }
+                    }
                     Spacer(Modifier.height(4.dp))
-                    Text("Spotlight uses the event banner supplied by its organizer. Tiqet does not replace event artwork.", color = Muted, fontSize = 9.sp, lineHeight = 13.sp)
+                    Text("The organizer owns this artwork. Tiqet only controls the Spotlight placement, label and expiry.", color = Muted, fontSize = 9.sp, lineHeight = 13.sp)
                     Spacer(Modifier.height(7.dp))
                     OutlinedButton(
                         onClick={selectedPublishedEvent=event;showFlagConfirm=true},
@@ -940,6 +1012,108 @@ private fun EventQueueScreen(
                 }
             }
         }
+    }
+
+    val configuredSpotlightEvent = selectedSpotlightEvent
+    if (showSpotlightDialog && configuredSpotlightEvent != null) {
+        val currentSpotlight = spotlightById[configuredSpotlightEvent.optString("id")]
+        val sortOrderValue = spotlightSortOrder.toIntOrNull()
+        val bannerUrl = configuredSpotlightEvent.optString("image_url")
+        AlertDialog(
+            onDismissRequest = { showSpotlightDialog = false },
+            title = { Text(if (currentSpotlight != null) "Edit Tiqet Spotlight" else "Feature in Tiqet Spotlight") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 430.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(9.dp)
+                ) {
+                    Text(
+                        "Set how this event appears in the curated section. The organizer's banner is previewed below and is never replaced by TIQET.",
+                        color = Muted,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp
+                    )
+                    if (bannerUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = bannerUrl,
+                            contentDescription = "Organizer-provided Spotlight banner",
+                            modifier = Modifier.fillMaxWidth().height(145.dp).clip(RoundedCornerShape(12.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                    Text(
+                        configuredSpotlightEvent.optString("title", "Untitled event"),
+                        color = Ink,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    OutlinedTextField(
+                        value = spotlightLabel,
+                        onValueChange = { spotlightLabel = it.take(40) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Spotlight label") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    OutlinedTextField(
+                        value = spotlightSortOrder,
+                        onValueChange = { spotlightSortOrder = it.filter(Char::isDigit).take(5) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Priority / order (0–10000)") },
+                        supportingText = { Text("Lower numbers appear earlier in Spotlight.") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    Text("AUTOMATIC EXPIRY", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Box {
+                        OutlinedButton(
+                            onClick = { spotlightExpiryExpanded = true },
+                            shape = RoundedCornerShape(11.dp)
+                        ) {
+                            Text(if (spotlightExpiryDays == 0) "No automatic expiry" else "After ${spotlightExpiryDays} days")
+                        }
+                        DropdownMenu(
+                            expanded = spotlightExpiryExpanded,
+                            onDismissRequest = { spotlightExpiryExpanded = false }
+                        ) {
+                            listOf(1, 3, 7, 14, 30).forEach { days ->
+                                DropdownMenuItem(
+                                    text = { Text("${days} days") },
+                                    onClick = { spotlightExpiryDays = days; spotlightExpiryExpanded = false }
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text("No automatic expiry") },
+                                onClick = { spotlightExpiryDays = 0; spotlightExpiryExpanded = false }
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !busy && sortOrderValue != null && sortOrderValue in 0..10000 &&
+                        spotlightLabel.trim().isNotEmpty() && bannerUrl.isNotBlank(),
+                    onClick = {
+                        val endsAt = if (spotlightExpiryDays == 0) null
+                            else Instant.now().plusSeconds(spotlightExpiryDays.toLong() * 24L * 60L * 60L).toString()
+                        showSpotlightDialog = false
+                        onSetSpotlight(
+                            configuredSpotlightEvent.optString("id"),
+                            true,
+                            sortOrderValue!!,
+                            endsAt,
+                            spotlightLabel.trim()
+                        )
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Teal)
+                ) { Text("Save Spotlight") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSpotlightDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 
     val flaggedEvent=selectedPublishedEvent
@@ -973,6 +1147,13 @@ private fun EventQueueScreen(
             dismissButton={TextButton(onClick={showFlagConfirm=false}) { Text("Cancel") }}
         )
     }
+}
+
+private fun spotlightExpiryPreset(endsAt: String?): Int {
+    if (endsAt.isNullOrBlank()) return 0
+    val end = runCatching { Instant.parse(endsAt) }.getOrNull() ?: return 7
+    val hoursRemaining = Duration.between(Instant.now(), end).toHours()
+    return listOf(1, 3, 7, 14, 30).minByOrNull { kotlin.math.abs(it.toLong() * 24L - hoursRemaining) } ?: 7
 }
 
 private data class ReviewAction(val label: String, val decision: String, val color: Color)
