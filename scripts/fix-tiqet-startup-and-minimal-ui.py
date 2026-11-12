@@ -123,39 +123,31 @@ private fun RoleCard(label: String, isBuyer: Boolean, onClick: () -> Unit) {
 }
 '''
 
-main, role_count = re.subn(
-    r'(?ms)(?:@Composable\s+)?private fun RoleChooser\(.*?(?=(?:@Composable\s+)?private fun RoleCard\()',
-    role_chooser + "\n",
-    main,
-    count=1
-)
-if role_count != 1:
-    raise SystemExit(f"Could not restore original RoleChooser; matches={role_count}.")
-# Replace RoleCard by matching its Kotlin block so nested click/layout lambdas are preserved.
-role_signature = "private fun RoleCard("
-role_start = main.find(role_signature)
-if role_start < 0:
-    raise SystemExit("Original RoleCard function is missing.")
-annotation_start = main.rfind("@Composable", 0, role_start)
-if annotation_start < 0 or role_start - annotation_start > 40:
-    annotation_start = role_start
-opening = main.find("{", role_start + len(role_signature))
-if opening < 0:
-    raise SystemExit("Original RoleCard body is missing.")
-depth = 0
-closing = -1
-for index in range(opening, len(main)):
-    if main[index] == "{":
-        depth += 1
-    elif main[index] == "}":
-        depth -= 1
-        if depth == 0:
-            closing = index + 1
-            break
-if closing < 0:
-    raise SystemExit("Original RoleCard body is not balanced.")
-main = main[:annotation_start] + role_card + main[closing:]
+def replace_function_by_braces(source: str, signature: str, replacement: str) -> str:
+    fn_start = source.find(signature)
+    if fn_start < 0:
+        raise SystemExit(f"Missing source function: {signature}")
+    annotation = source.rfind("@Composable", 0, fn_start)
+    start = annotation if annotation >= 0 and fn_start - annotation < 50 else fn_start
+    opening = source.find("{", fn_start + len(signature))
+    if opening < 0:
+        raise SystemExit(f"Missing body for source function: {signature}")
+    depth = 0
+    closing = -1
+    for index in range(opening, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                closing = index + 1
+                break
+    if closing < 0:
+        raise SystemExit(f"Unbalanced body for source function: {signature}")
+    return source[:start] + replacement.rstrip() + source[closing:]
 
+main = replace_function_by_braces(main, "private fun RoleChooser(", role_chooser)
+main = replace_function_by_braces(main, "private fun RoleCard(", role_card)
 
 # Fail the build if a future edit silently swaps out the original Tiqet entry UI.
 if "private fun RoleChooser" not in main or "I'm here to discover and book events." not in main:
