@@ -35,6 +35,7 @@ jobs:
   build:
     name: Compile V7.2 debug APK and package backend source
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     env:
       SUPABASE_URL: "https://ebrrdmxyoioefoprtict.supabase.co"
       SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVicnJkbXh5b2lvZWZvcHJ0aWN0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQwMzA2NzMsImV4cCI6MjEwOTYwNjY3M30.Av8tI5byGaTVSkePdt6BsU4qdfXXij2f8Tg9vUbWfNo"
@@ -318,6 +319,7 @@ jobs:
 
 
       - name: Smoke-test customer app launch and authentication screens
+        timeout-minutes: 12
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
