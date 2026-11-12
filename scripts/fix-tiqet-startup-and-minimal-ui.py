@@ -149,6 +149,58 @@ def replace_function_by_braces(source: str, signature: str, replacement: str) ->
 main = replace_function_by_braces(main, "private fun RoleChooser(", role_chooser)
 main = replace_function_by_braces(main, "private fun RoleCard(", role_card)
 
+# The full-refresh patch removed the original ticket glyph while the restored cards still use it.
+ticket_imports = [
+    "import androidx.compose.foundation.Canvas\n",
+    "import androidx.compose.ui.geometry.CornerRadius\n",
+    "import androidx.compose.ui.geometry.Offset\n",
+    "import androidx.compose.ui.geometry.Size\n",
+    "import androidx.compose.ui.graphics.PathEffect\n",
+    "import androidx.compose.ui.graphics.drawscope.Stroke\n",
+]
+for import_line in ticket_imports:
+    if import_line not in main:
+        if import_line.startswith("import androidx.compose.foundation."):
+            anchor = "import androidx.compose.foundation.background\n"
+        elif import_line.startswith("import androidx.compose.ui.geometry."):
+            anchor = "import androidx.compose.ui.graphics.Color\n"
+        else:
+            anchor = "import androidx.compose.ui.graphics.PathEffect\n" if "drawscope" in import_line else "import androidx.compose.ui.geometry.Size\n"
+        if main.count(anchor) != 1:
+            raise SystemExit(f"Missing or ambiguous import insertion point: {anchor.strip()}")
+        main = main.replace(anchor, anchor + import_line, 1)
+
+if "private fun TicketMark(" not in main:
+    ticket_mark = r'''@Composable
+private fun TicketMark(color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val left = size.width * 0.12f
+        val top = size.height * 0.21f
+        val width = size.width * 0.76f
+        val height = size.height * 0.58f
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(left, top),
+            size = Size(width, height),
+            cornerRadius = CornerRadius(5.dp.toPx()),
+            style = Stroke(width = 1.7.dp.toPx())
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.5f, top + 2.dp.toPx()),
+            end = Offset(size.width * 0.5f, top + height - 2.dp.toPx()),
+            strokeWidth = 1.4.dp.toPx(),
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx()))
+        )
+    }
+}
+
+'''
+    insert_at = main.find("private data class EventCardModel(")
+    if insert_at < 0:
+        raise SystemExit("Could not find EventCardModel insertion point for ticket glyph.")
+    main = main[:insert_at] + ticket_mark + main[insert_at:]
+
 # Fail the build if a future edit silently swaps out the original Tiqet entry UI.
 if "private fun RoleChooser" not in main or "I'm here to discover and book events." not in main:
     raise SystemExit("Original Tiqet role chooser text is missing; refusing an unintended entry UI replacement.")
