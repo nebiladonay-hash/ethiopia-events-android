@@ -237,3 +237,182 @@ api = api.replace(old_auth, new_auth, 1)
 api_path.write_text(api)
 
 print("Original Tiqet red/ivory ticket-card UI preserved; Spotlight loads independently; Supabase 401 refresh is bounded to one retry.")
+
+
+# --- Restore the classic Tiqet red/ivory wave identity and normalize auth scrolling. ---
+main_path = root / "app/src/main/java/et/events/mobile/MainActivity.kt"
+auth_path = root / "app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
+organiser_path = root / "app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
+brand_path = root / "app/src/main/java/et/events/mobile/TiqetBrand.kt"
+
+main = main_path.read_text()
+for old, new, label in (
+    ("private val BrandRed = Color(0xFF940A2D)", "private val BrandRed = Color(0xFFB82035)", "Classic main red"),
+    ("private val BrandIvory = Color(0xFFF6F0ED)", "private val BrandIvory = Color(0xFFF7F1E7)", "Classic main ivory"),
+    ("private val Ink = Color(0xFF282226)", "private val Ink = Color(0xFF2B2020)", "Classic main ink"),
+    ("private val Muted = Color(0xFF756C70)", "private val Muted = Color(0xFF8C7771)", "Classic muted text"),
+    ("private val Hairline = Color(0xFFE9E4DE)", "private val Hairline = Color(0xFFE6D9CB)", "Classic separators"),
+    ("private val SoftIvory = Color(0xFFFFFFFF)", "private val SoftIvory = Color(0xFFFFFBF5)", "Classic card surface"),
+    ("window.statusBarColor = android.graphics.Color.rgb(148, 10, 45)", "window.statusBarColor = android.graphics.Color.rgb(184, 32, 53)", "Classic status bar"),
+    ("window.navigationBarColor = android.graphics.Color.rgb(246, 240, 237)", "window.navigationBarColor = android.graphics.Color.rgb(247, 241, 231)", "Classic navigation bar"),
+):
+    main = main.replace(old, new, 1) if old in main else main
+    if new not in main:
+        raise SystemExit(f"{label}: expected palette value is absent.")
+main_path.write_text(main)
+
+brand_stamp = r'''@Composable
+private fun BrandStamp() {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+        Box(
+            modifier = Modifier
+                .size(11.dp)
+                .clip(CircleShape)
+                .background(BrandRed)
+        )
+        Text(
+            text = "TIQET",
+            color = BrandRed,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = 3.sp
+        )
+    }
+}
+'''
+main = replace_function_by_braces(main, "private fun BrandStamp(", brand_stamp)
+
+role_chooser = r'''@Composable
+private fun RoleChooser(onChoose: (String) -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BrandIvory)
+            .systemBarsPadding()
+    ) {
+        TiqetWaveHeader(
+            title = "Welcome to Tiqet",
+            subtitle = "Discover events or organise your own.",
+            height = 174.dp
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(horizontal = 24.dp, vertical = 22.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            RoleCard(
+                label = "I'm here to discover and book events.",
+                isBuyer = true,
+                onClick = { onChoose("buyer") }
+            )
+            Spacer(Modifier.height(13.dp))
+            RoleCard(
+                label = "I'm here to organise events.",
+                isBuyer = false,
+                onClick = { onChoose("organizer") }
+            )
+        }
+    }
+}
+'''
+main = replace_function_by_braces(main, "private fun RoleChooser(", role_chooser)
+main_path.write_text(main)
+
+for path, prefix in ((auth_path, "Auth"), (organiser_path, "Org")):
+    source = path.read_text()
+    for name, old, new in (
+        ("Red", "940A2D", "B82035"),
+        ("Ivory", "F6F0ED", "F7F1E7"),
+        ("Ink", "282226", "2B2020"),
+        ("Muted", "756C70", "8C7771"),
+    ):
+        old_line = f"private val {prefix}{name} = Color(0xFF{old})"
+        new_line = f"private val {prefix}{name} = Color(0xFF{new})"
+        if old_line in source:
+            source = source.replace(old_line, new_line, 1)
+        elif new_line not in source:
+            raise SystemExit(f"Missing {prefix}{name} palette definition.")
+    path.write_text(source)
+
+# One scroll owner on the auth root; the IME and system bars are handled once.
+auth = auth_path.read_text()
+auth_lines = []
+seen_imports = set()
+for line in auth.splitlines(keepends=True):
+    if line.startswith("import "):
+        if line in seen_imports:
+            continue
+        seen_imports.add(line)
+    auth_lines.append(line)
+auth = "".join(auth_lines)
+auth_root = re.compile(
+    r"(?ms)^    Column\(\n        modifier = Modifier\n.*?^        verticalArrangement = Arrangement\.(?:Center|Top)\n    \) \{"
+)
+auth_match = auth_root.search(auth)
+if not auth_match:
+    raise SystemExit("Could not find the signup/login root Column for scroll normalization.")
+clean_auth_root = '''    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AuthIvory)
+            .systemBarsPadding()
+            .imePadding()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.Top
+    ) {'''
+auth = auth[:auth_match.start()] + clean_auth_root + auth[auth_match.end():]
+if auth.count(".verticalScroll(rememberScrollState())") != 1:
+    raise SystemExit("Auth screen must contain exactly one vertical scroll modifier.")
+if auth.count("import androidx.compose.foundation.verticalScroll\n") != 1:
+    raise SystemExit("Auth verticalScroll import is duplicated or missing.")
+if auth.count("import androidx.compose.foundation.rememberScrollState\n") != 1:
+    raise SystemExit("Auth rememberScrollState import is duplicated or missing.")
+auth_path.write_text(auth)
+
+brand = brand_path.read_text()
+for old, new, label in (
+    ("private val TiqetCrimson = Color(0xFF940A2D)", "private val TiqetCrimson = Color(0xFFB82035)", "Classic wave crimson"),
+    ("private val TiqetCherry = Color(0xFFB9153F)", "private val TiqetCherry = Color(0xFFD04A5D)", "Classic wave cherry"),
+    ("private val TiqetBurgundy = Color(0xFF5A071F)", "private val TiqetBurgundy = Color(0xFF981C32)", "Classic wave shade"),
+    ("private val TiqetIvory = Color(0xFFF6F0ED)", "private val TiqetIvory = Color(0xFFF7F1E7)", "Classic wave ivory"),
+):
+    brand = brand.replace(old, new, 1) if old in brand else brand
+    if new not in brand:
+        raise SystemExit(f"{label}: expected palette value is absent.")
+
+ribbon_start = brand.find("            // A quiet ribbon inside the red field")
+edge_start = brand.find("            val edge = Path()", ribbon_start)
+if ribbon_start >= 0 and edge_start > ribbon_start:
+    brand = brand[:ribbon_start] + brand[edge_start:]
+elif "val ribbon = Path()" in brand or "val zigzag = Path()" in brand:
+    raise SystemExit("Could not safely remove the wave decoration paths.")
+
+old_header_mark = '''                TiqetBrandMark(
+                    modifier = Modifier.width(30.dp).height(25.dp),
+                    ticketColor = TiqetIvory,
+                    cutoutColor = TiqetBurgundy
+                )
+                Text("Tiqet", color = TiqetIvory, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.35).sp)'''
+new_header_mark = '''                Text("TIQET", color = TiqetIvory, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 2.4.sp)'''
+if old_header_mark in brand:
+    brand = brand.replace(old_header_mark, new_header_mark, 1)
+elif new_header_mark not in brand:
+    raise SystemExit("Could not restore the simple TIQET wordmark in the wave header.")
+brand_path.write_text(brand)
+
+main = main_path.read_text()
+auth = auth_path.read_text()
+brand = brand_path.read_text()
+assert "private val BrandRed = Color(0xFFB82035)" in main
+assert "private val BrandIvory = Color(0xFFF7F1E7)" in main
+assert "TiqetWaveHeader(" in main[main.find("private fun RoleChooser"):main.find("private fun RoleCard")]
+assert "I'm here to discover and book events." in main
+assert "TicketMark(color = foreground" in main
+assert "private val TiqetCrimson = Color(0xFFB82035)" in brand
+assert "val zigzag = Path()" not in brand and "val ribbon = Path()" not in brand
+assert auth.count(".verticalScroll(rememberScrollState())") == 1
+assert auth.count("import androidx.compose.foundation.verticalScroll\n") == 1
+assert auth.count("import androidx.compose.foundation.rememberScrollState\n") == 1
+print("Classic Tiqet red/ivory ticket-card UI and clean wave header restored; duplicate auth scrolling removed.")
