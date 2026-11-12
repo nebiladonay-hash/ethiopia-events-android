@@ -454,3 +454,6 @@ assert auth.count("import androidx.compose.foundation.rememberScrollState\n") ==
 print("Classic Tiqet red/ivory ticket-card UI and clean wave header restored; duplicate auth scrolling removed.")
 
 # Rebuild trigger: APK is uploaded immediately after compilation, before launch verification.
+
+
+# Rebuild trigger: publish APK before emulator check.
