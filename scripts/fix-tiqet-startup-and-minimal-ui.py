@@ -131,14 +131,31 @@ main, role_count = re.subn(
 )
 if role_count != 1:
     raise SystemExit(f"Could not restore original RoleChooser; matches={role_count}.")
-main, card_count = re.subn(
-    r'(?ms)(?:@Composable\s+)?private fun RoleCard\(.*?(?=@Composable\s+private fun TicketMark\()',
-    role_card + "\n",
-    main,
-    count=1
-)
-if card_count != 1:
-    raise SystemExit(f"Could not restore original RoleCard; matches={card_count}.")
+# Replace RoleCard by matching its Kotlin block so nested click/layout lambdas are preserved.
+role_signature = "private fun RoleCard("
+role_start = main.find(role_signature)
+if role_start < 0:
+    raise SystemExit("Original RoleCard function is missing.")
+annotation_start = main.rfind("@Composable", 0, role_start)
+if annotation_start < 0 or role_start - annotation_start > 40:
+    annotation_start = role_start
+opening = main.find("{", role_start + len(role_signature))
+if opening < 0:
+    raise SystemExit("Original RoleCard body is missing.")
+depth = 0
+closing = -1
+for index in range(opening, len(main)):
+    if main[index] == "{":
+        depth += 1
+    elif main[index] == "}":
+        depth -= 1
+        if depth == 0:
+            closing = index + 1
+            break
+if closing < 0:
+    raise SystemExit("Original RoleCard body is not balanced.")
+main = main[:annotation_start] + role_card + main[closing:]
+
 
 # Fail the build if a future edit silently swaps out the original Tiqet entry UI.
 if "private fun RoleChooser" not in main or "I'm here to discover and book events." not in main:
