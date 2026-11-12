@@ -237,7 +237,7 @@ jobs:
               "ticket card mark": ("TicketMark(color = foreground" in main),
               "no unwanted generic splash": ("Make room for good plans." not in main),
               "Discover retry": ("onRetry" in main),
-              "classic text navigation": ("private fun BottomBar" in main and __import__("re").search(r"Text\\(\\s*item\\s*,", main) is not None and "Icons.Outlined.Explore" not in main),
+              "classic text navigation": ("private fun BottomBar" in main and __import__("re").search(r"Text\(\s*item\s*,", main) is not None and "Icons.Outlined.Explore" not in main),
               "organiser-owned banner upload": ("uploadEventBanner" in api and "set_organiser_event_banner" in api),
           }
           failed = []
