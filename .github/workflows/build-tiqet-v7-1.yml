@@ -208,38 +208,47 @@ jobs:
           python3 "$GITHUB_WORKSPACE/scripts/simplify-tiqet-event-creation.py" "$PROJECT_DIR"
           python3 "$GITHUB_WORKSPACE/scripts/harden-tiqet-network-errors.py" "$PROJECT_DIR"
           python3 "$GITHUB_WORKSPACE/scripts/fix-tiqet-startup-and-minimal-ui.py" "$PROJECT_DIR"
-          grep -q 'Publish event now' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
-          grep -q 'create_event_with_ticket_options' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
-          grep -q 'fitTiqetEventBanner' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
-          ! grep -q 'approval_status=eq.approved' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
-          grep -q 'val rows = requestArray("GET", "/rest/v1/events?$query", useSession = false)' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
-          ! grep -q 'set_organiser_auto_publish' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
-          ! grep -q 'set_organiser_auto_publish' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
-          grep -q 'VVIP' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
-          ! grep -q 'TIQET PLATFORM REVENUE' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
-          ! grep -q 'fetchPlatformRevenueSummary' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
-          grep -q 'TiqetWaveHeader' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
-          grep -q 'padding(horizontal = 24.dp, vertical = 20.dp)' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
-          grep -q 'padding(horizontal = 21.dp)' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
-          grep -q 'verticalArrangement = Arrangement.Center' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
-          ! grep -q 'Publishing requires verification' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
-          ! grep -q 'fetchPlatformRevenueSummary' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
-          ! grep -q 'withdrawPlatformRevenue' "$PROJECT_DIR/app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
-          grep -q 'Boxing Matches' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
-          grep -q 'Tiqet Spotlight' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
-          grep -q 'userFacingError' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
-          grep -q 'retryAuth = false' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
-          grep -q "I'm here to discover and book events." "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
-          grep -q 'TicketMark(color = foreground' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
-          ! grep -q 'Make room for good plans.' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
-          grep -q 'onRetry' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
-          grep -q 'private fun BottomBar' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
-          grep -q 'Text(item,' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
-          ! grep -q 'Icons.Outlined.Explore' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
-          grep -q 'fetchSpotlightEvents' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
-          grep -q 'uploadEventBanner' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
-          grep -q 'set_organiser_event_banner' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
-          echo "Spotlight, Boxing Matches, classic text navigation and organizer-owned banners applied."
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path(__import__("os").environ["PROJECT_DIR"]) / "app/src/main/java/et/events/mobile"
+          main = (root / "MainActivity.kt").read_text()
+          api = (root / "backend/TiqetApi.kt").read_text()
+          org = (root / "TiqetOrganizerScreen.kt").read_text()
+          auth = (root / "TiqetAuthScreen.kt").read_text()
+          checks = {
+              "event publishing action": ("Publish event now" in org),
+              "ticket tier creation API": ("create_event_with_ticket_options" in api),
+              "automatic event banner fitting": ("fitTiqetEventBanner" in api),
+              "no legacy event approval filter": ("approval_status=eq.approved" not in api),
+              "public events use anon client": ('val rows = requestArray("GET", "/rest/v1/events?$query", useSession = false)' in api),
+              "removed auto-publish RPC": ("set_organiser_auto_publish" not in api and "set_organiser_auto_publish" not in org),
+              "VVIP ticket option": ("VVIP" in org),
+              "platform revenue removed from organiser": ("TIQET PLATFORM REVENUE" not in org and "fetchPlatformRevenueSummary" not in org and "withdrawPlatformRevenue" not in org),
+              "wave header retained on auth": ("TiqetWaveHeader" in auth),
+              "auth body gutter retained": ("padding(horizontal = 24.dp, vertical = 20.dp)" in auth),
+              "organiser body gutter retained": ("padding(horizontal = 21.dp)" in org),
+              "auth form centered": ("verticalArrangement = Arrangement.Center" in auth),
+              "no event approval copy": ("Publishing requires verification" not in auth),
+              "Boxing Matches category": ("Boxing Matches" in main),
+              "Spotlight feed": ("Tiqet Spotlight" in main and "fetchSpotlightEvents" in api),
+              "customer-safe error mapping": ("userFacingError" in api),
+              "bounded auth retry": ("retryAuth = false" in api),
+              "classic buyer entry card": ("I'm here to discover and book events." in main),
+              "ticket card mark": ("TicketMark(color = foreground" in main),
+              "no unwanted generic splash": ("Make room for good plans." not in main),
+              "Discover retry": ("onRetry" in main),
+              "classic text navigation": ("private fun BottomBar" in main and "Text(item," in main and "Icons.Outlined.Explore" not in main),
+              "organiser-owned banner upload": ("uploadEventBanner" in api and "set_organiser_event_banner" in api),
+          }
+          failed = []
+          for label, ok in checks.items():
+              print(("PASS " if ok else "FAIL ") + label)
+              if not ok:
+                  failed.append(label)
+          if failed:
+              raise SystemExit("UI source assertions failed: " + ", ".join(failed))
+          print("All Tiqet V7.2 UI and API source assertions passed.")
+          PY
       - name: Overlay canonical deployed Edge Function source
         shell: bash
         run: |
