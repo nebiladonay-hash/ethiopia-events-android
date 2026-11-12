@@ -84,6 +84,10 @@ def replace_function(source: str, signature: str, replacement: str) -> str:
 
 
 main = main_path.read_text()
+height_import = "import androidx.compose.foundation.layout.height\n"
+if main.count(height_import) != 1:
+    raise SystemExit("MainActivity height import anchor missing or ambiguous.")
+main = main.replace(height_import, height_import + "import androidx.compose.foundation.layout.heightIn\n", 1)
 
 # Do not make a slow Spotlight call hold the entire Discover screen in its loading state.
 # The live event list and curated banner rail load independently.
@@ -132,8 +136,7 @@ if main.count(selected_tab) != 1:
 main = main.replace(selected_tab, spotlight_effect + selected_tab, 1)
 
 # Simplify the role chooser: equal neutral choices, restrained red accents, no oversized solid-red card.
-role_chooser = r'''@Composable
-private fun RoleChooser(onChoose: (String) -> Unit) {
+role_chooser = r'''private fun RoleChooser(onChoose: (String) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -183,8 +186,7 @@ private fun RoleChooser(onChoose: (String) -> Unit) {
 '''
 main = replace_function(main, "private fun RoleChooser(", role_chooser)
 
-role_card = r'''@Composable
-private fun RoleCard(label: String, isBuyer: Boolean, onClick: () -> Unit) {
+role_card = r'''private fun RoleCard(label: String, isBuyer: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
