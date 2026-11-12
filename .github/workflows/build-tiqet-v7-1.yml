@@ -391,7 +391,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tiqet-classic-wave-emulator-proof
-          path: \${{ runner.temp }}/tiqet-signup.png
+          path: ${{ runner.temp }}/tiqet-signup.png
           if-no-files-found: ignore
 
       - name: Upload debug APK
