@@ -402,6 +402,42 @@ elif new_header_mark not in brand:
     raise SystemExit("Could not restore the simple TIQET wordmark in the wave header.")
 brand_path.write_text(brand)
 
+
+# Restore the previous text-led bottom navigation instead of the newer icon-heavy refresh.
+main = main_path.read_text()
+bottom_bar = r'''@Composable
+private fun BottomBar(items: List<String>, selected: String, onSelect: (String) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.White)
+            .border(BorderStroke(0.7.dp, Hairline))
+            .padding(horizontal = 5.dp, vertical = 7.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        items.forEach { item ->
+            Column(
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { onSelect(item) }.padding(vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Box(modifier = Modifier.width(22.dp).height(3.dp).clip(RoundedCornerShape(50)).background(if (item == selected) BrandRed else Color.Transparent))
+                Text(
+                    item,
+                    color = if (item == selected) BrandRed else Muted,
+                    fontSize = 10.sp,
+                    fontWeight = if (item == selected) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+'''
+main = replace_function_by_braces(main, "private fun BottomBar(", bottom_bar)
+main_path.write_text(main)
+
 main = main_path.read_text()
 auth = auth_path.read_text()
 brand = brand_path.read_text()
