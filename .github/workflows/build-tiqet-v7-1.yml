@@ -317,6 +317,13 @@ jobs:
       - name: Assemble debug APK
         run: gradle --no-daemon -p "$PROJECT_DIR" assembleDebug
 
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiqet-v7-2-debug-apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
 
       - name: Smoke-test customer app launch and authentication screens
         timeout-minutes: 12
@@ -336,12 +343,6 @@ jobs:
           path: ${{ runner.temp }}/tiqet-signup.png
           if-no-files-found: ignore
 
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: tiqet-v7-2-debug-apk
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
 
       - name: Upload canonical Supabase backend source
         uses: actions/upload-artifact@v4
