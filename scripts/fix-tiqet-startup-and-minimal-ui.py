@@ -57,6 +57,89 @@ if main.count(selected_tab) != 1:
     raise SystemExit("BuyerApp selected-tab insertion point is missing or ambiguous.")
 main = main.replace(selected_tab, spotlight_effect + selected_tab, 1)
 
+# Restore the established Tiqet red/ivory role chooser and ticket cards after the older UI patch.
+role_chooser = r'''@Composable
+private fun RoleChooser(onChoose: (String) -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BrandIvory)
+            .systemBarsPadding()
+            .padding(horizontal = 24.dp, vertical = 25.dp)
+    ) {
+        BrandStamp()
+        Spacer(Modifier.weight(1f))
+        RoleCard(
+            label = "I'm here to discover and book events.",
+            isBuyer = true,
+            onClick = { onChoose("buyer") }
+        )
+        Spacer(Modifier.height(13.dp))
+        RoleCard(
+            label = "I'm here to organise events.",
+            isBuyer = false,
+            onClick = { onChoose("organizer") }
+        )
+        Spacer(Modifier.weight(1.15f))
+    }
+}
+'''
+
+role_card = r'''@Composable
+private fun RoleCard(label: String, isBuyer: Boolean, onClick: () -> Unit) {
+    val background = if (isBuyer) BrandRed else BrandIvory
+    val foreground = if (isBuyer) BrandIvory else BrandRed
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(133.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(background)
+            .then(
+                if (isBuyer) Modifier else Modifier.border(1.4.dp, BrandRed, RoundedCornerShape(22.dp))
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 21.dp, vertical = 20.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = label,
+                color = foreground,
+                fontSize = 17.sp,
+                lineHeight = 23.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f).padding(end = 14.dp)
+            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                TicketMark(color = foreground, modifier = Modifier.size(37.dp))
+                Text("↗", color = foreground, fontSize = 19.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+'''
+
+main, role_count = re.subn(
+    r'(?ms)(?:@Composable\s+)?private fun RoleChooser\(.*?(?=(?:@Composable\s+)?private fun RoleCard\()',
+    role_chooser + "\n",
+    main,
+    count=1
+)
+if role_count != 1:
+    raise SystemExit(f"Could not restore original RoleChooser; matches={role_count}.")
+main, card_count = re.subn(
+    r'(?ms)(?:@Composable\s+)?private fun RoleCard\(.*?(?=@Composable\s+private fun TicketMark\()',
+    role_card + "\n",
+    main,
+    count=1
+)
+if card_count != 1:
+    raise SystemExit(f"Could not restore original RoleCard; matches={card_count}.")
+
 # Fail the build if a future edit silently swaps out the original Tiqet entry UI.
 if "private fun RoleChooser" not in main or "I'm here to discover and book events." not in main:
     raise SystemExit("Original Tiqet role chooser text is missing; refusing an unintended entry UI replacement.")
