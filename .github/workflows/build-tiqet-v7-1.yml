@@ -233,11 +233,13 @@ jobs:
           grep -q 'TicketMark(color = foreground' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
           ! grep -q 'Make room for good plans.' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
           grep -q 'onRetry' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
-          grep -q 'Icons.Outlined.Explore' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
+          grep -q 'private fun BottomBar' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
+          grep -q 'Text(item,' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
+          ! grep -q 'Icons.Outlined.Explore' "$PROJECT_DIR/app/src/main/java/et/events/mobile/MainActivity.kt"
           grep -q 'fetchSpotlightEvents' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
           grep -q 'uploadEventBanner' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
           grep -q 'set_organiser_event_banner' "$PROJECT_DIR/app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
-          echo "Spotlight, Boxing Matches, minimalist navigation and organizer-owned banners applied."
+          echo "Spotlight, Boxing Matches, classic text navigation and organizer-owned banners applied."
       - name: Overlay canonical deployed Edge Function source
         shell: bash
         run: |
