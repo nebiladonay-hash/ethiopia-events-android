@@ -5,11 +5,23 @@ on:
   push:
     branches:
       - v7.1-integration
+      - tiqet-spotlight-discovery
     paths:
       - 'Tiqet_Android_V7_1.zip'
       - 'supabase/functions/**'
       - 'supabase/migrations/**'
       - 'patches/v7-2-payment-methods-api.patch'
+      - 'scripts/apply-tiqet-spotlight.py'
+      - 'scripts/add-organizer-category-shortcuts.py'
+      - 'scripts/remove-platform-revenue-from-organizer.py'
+      - 'scripts/fix-tiqet-wave-header-layout.py'
+      - 'scripts/simplify-tiqet-event-creation.py'
+      - 'scripts/harden-tiqet-network-errors.py'
+      - 'scripts/fix-tiqet-startup-and-minimal-ui.py'
+      - 'supabase/migrations/20261111103000_tiqet_spotlight_events.sql'
+      - 'supabase/migrations/20261111110000_tiqet_organizer_event_banners.sql'
+      - 'supabase/tests/tiqet_spotlight_*'
+      - '.github/workflows/test-tiqet-spotlight.yml'
       - 'patches/v7-2-minimal-ui.patch.gz.b64'
       - 'patches/v7-2-wave-ui.patch.gz.b64'
       - 'patches/v7-2-wave-finish.patch.gz.b64'
@@ -23,6 +35,7 @@ jobs:
   build:
     name: Compile V7.2 debug APK and package backend source
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     env:
       SUPABASE_URL: "https://ebrrdmxyoioefoprtict.supabase.co"
       SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVicnJkbXh5b2lvZWZvcHJ0aWN0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQwMzA2NzMsImV4cCI6MjEwOTYwNjY3M30.Av8tI5byGaTVSkePdt6BsU4qdfXXij2f8Tg9vUbWfNo"
@@ -185,6 +198,58 @@ jobs:
           print("Exact previous cream-ticket/burgundy-T launcher restored; only artwork scale reduced to 72%.")
           PY
 
+      - name: Apply Spotlight, Boxing Matches and organizer-owned banner UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "$GITHUB_WORKSPACE/scripts/apply-tiqet-spotlight.py" "$PROJECT_DIR"
+          python3 "$GITHUB_WORKSPACE/scripts/add-organizer-category-shortcuts.py" "$PROJECT_DIR"
+          python3 "$GITHUB_WORKSPACE/scripts/remove-platform-revenue-from-organizer.py" "$PROJECT_DIR"
+          python3 "$GITHUB_WORKSPACE/scripts/fix-tiqet-wave-header-layout.py" "$PROJECT_DIR"
+          python3 "$GITHUB_WORKSPACE/scripts/simplify-tiqet-event-creation.py" "$PROJECT_DIR"
+          python3 "$GITHUB_WORKSPACE/scripts/harden-tiqet-network-errors.py" "$PROJECT_DIR"
+          python3 "$GITHUB_WORKSPACE/scripts/fix-tiqet-startup-and-minimal-ui.py" "$PROJECT_DIR"
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path(__import__("os").environ["PROJECT_DIR"]) / "app/src/main/java/et/events/mobile"
+          main = (root / "MainActivity.kt").read_text()
+          api = (root / "backend/TiqetApi.kt").read_text()
+          org = (root / "TiqetOrganizerScreen.kt").read_text()
+          auth = (root / "TiqetAuthScreen.kt").read_text()
+          checks = {
+              "event publishing action": ("Publish event now" in org),
+              "ticket tier creation API": ("create_event_with_ticket_options" in api),
+              "automatic event banner fitting": ("fitTiqetEventBanner" in api),
+              "no legacy event approval filter": ("approval_status=eq.approved" not in api),
+              "public events use anon client": ('val rows = requestArray("GET", "/rest/v1/events?$query", useSession = false)' in api),
+              "removed auto-publish RPC": ("set_organiser_auto_publish" not in api and "set_organiser_auto_publish" not in org),
+              "VVIP ticket option": ("VVIP" in org),
+              "platform revenue removed from organiser": ("TIQET PLATFORM REVENUE" not in org and "fetchPlatformRevenueSummary" not in org and "withdrawPlatformRevenue" not in org),
+              "wave header retained on auth": ("TiqetWaveHeader" in auth),
+              "auth body gutter retained": ("padding(horizontal = 24.dp, vertical = 20.dp)" in auth),
+              "organiser body gutter retained": ("padding(horizontal = 21.dp)" in org),
+              "auth form centered": ("verticalArrangement = Arrangement.Center" in auth),
+              "no event approval copy": ("Publishing requires verification" not in auth),
+              "Boxing Matches category": ("Boxing Matches" in main),
+              "Spotlight feed": ("Tiqet Spotlight" in main and "fetchSpotlightEvents" in api),
+              "customer-safe error mapping": ("userFacingError" in api),
+              "bounded auth retry": ("retryAuth = false" in api),
+              "classic buyer entry card": ("I'm here to discover and book events." in main),
+              "ticket card mark": ("TicketMark(color = foreground" in main),
+              "no unwanted generic splash": ("Make room for good plans." not in main),
+              "Discover retry": ("onRetry" in main),
+              "classic text navigation": ("private fun BottomBar" in main and __import__("re").search(r"Text\(\s*item\s*,", main) is not None and "Icons.Outlined.Explore" not in main),
+              "organiser-owned banner upload": ("uploadEventBanner" in api and "set_organiser_event_banner" in api),
+          }
+          failed = []
+          for label, ok in checks.items():
+              print(("PASS " if ok else "FAIL ") + label)
+              if not ok:
+                  failed.append(label)
+          if failed:
+              raise SystemExit("UI source assertions failed: " + ", ".join(failed))
+          print("All Tiqet V7.2 UI and API source assertions passed.")
+          PY
       - name: Overlay canonical deployed Edge Function source
         shell: bash
         run: |
@@ -258,6 +323,26 @@ jobs:
           name: tiqet-v7-2-debug-apk
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+
+      - name: Smoke-test customer app launch and authentication screens
+        timeout-minutes: 12
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: bash "$GITHUB_WORKSPACE/scripts/smoke-test-tiqet-android.sh"
+
+      - name: Upload emulator signup screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiqet-classic-wave-emulator-proof
+          path: ${{ runner.temp }}/tiqet-signup.png
+          if-no-files-found: ignore
+
 
       - name: Upload canonical Supabase backend source
         uses: actions/upload-artifact@v4
