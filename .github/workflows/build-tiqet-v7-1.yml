@@ -382,7 +382,7 @@ jobs:
             PY
             adb shell screencap -p /sdcard/tiqet-signup.png
             adb pull /sdcard/tiqet-signup.png "$RUNNER_TEMP/tiqet-signup.png"
-            if adb logcat -d -t 5000 | grep -E "FATAL EXCEPTION|Process: et\\.events\\.mobile"; then
+            if adb logcat -d -t 5000 | grep -F -e "FATAL EXCEPTION" -e "Process: et.events.mobile"; then
               echo "Android runtime crash detected during launch/auth navigation."
               exit 1
             fi
