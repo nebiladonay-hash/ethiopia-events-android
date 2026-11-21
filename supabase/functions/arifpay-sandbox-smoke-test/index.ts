@@ -72,7 +72,6 @@ Deno.serve(async (req: Request) => {
     notifyUrl,
     successUrl: 'https://payment.arifpay.org/success',
     expireDate: expiresAt,
-    amount: 10,
     items: [{
       name: 'Tiqet sandbox test ticket',
       quantity: 1,
