@@ -35,7 +35,7 @@ The remote schema contains 24 public tables; all observed public tables have RLS
 
 ## Active Edge Functions
 
-All nine functions were active at last verification:
+The following 14 functions were ACTIVE in TIQET-production at the November 21 verification:
 
 - `create-payment-intent`
 - `create-chapa-checkout`
@@ -43,11 +43,16 @@ All nine functions were active at last verification:
 - `chapa-payment-methods`
 - `chapa-payout-banks`
 - `create-chapa-organizer-subaccount`
+- `create-chapa-refund`
+- `verify-chapa-refund`
 - `create-platform-payout`
 - `platform-revenue-summary`
 - `payment-provider-catalog`
+- `tiqet-admin-user-action`
+- `arifpay-sandbox-smoke-test` (platform-owner JWT required)
+- `arifpay-sandbox-webhook` (JWT disabled; accepts sandbox JSON only and performs no financial writes)
 
-All functions except the provider webhook require a valid user JWT. The Chapa webhook has JWT verification disabled at the gateway because it validates the provider HMAC signature on the exact raw request body itself.
+The Chapa webhook has JWT verification disabled at the gateway because it validates the provider HMAC signature on the exact raw request body itself. The ArifPay sandbox webhook also has JWT verification disabled, but it is deliberately non-financial: it only validates JSON, logs allow-listed sandbox metadata, and never changes Tiqet records.
 
 ## Provider activation
 
@@ -209,3 +214,33 @@ The current companion-app source is an initial functional control MVP. Account s
 - Tiqet Control's Event Moderation section now has two queues: pending submissions and currently published events.
 - Moderators can flag a published event with a required reason. The backend immediately changes it to `submitted/pending`, removing it from the public published listing, and records the action in the audit log.
 - A flagged event remains subject to manual review even if its organizer has auto-publish trust enabled.
+
+
+## ArifPay sandbox-only probe — 21 November 2026
+
+Two isolated Edge Functions are deployed in TIqet-production and committed on the GitHub feature branch `arifpay-sandbox-integration` (based on `v7.1-integration`):
+
+- `arifpay-sandbox-smoke-test` — requires a valid user JWT and server-managed `app_metadata.tiqet_role=platform_owner`. It can create an ArifPay sandbox hosted session or run the documented Telebirr direct simulator using a fixed ETB 10 test amount and `SUCCESS` / `FAIL` simulator modes.
+- `arifpay-sandbox-webhook` — public callback endpoint for the sandbox probe only. It validates the request as a bounded JSON object, logs only allow-listed metadata, returns success, and does not write to orders, payments, tickets, inventory, ledgers, or payouts.
+
+The sandbox key `arif-sandbox-portal-key` is the fixed public key documented in ArifPay's official Sandbox Postman collection. If ArifPay gives Tiqet a different sandbox-only key, store it as the Supabase Edge Function secret `ARIFPAY_SANDBOX_KEY`; never commit merchant-specific credentials. The official sandbox host is `https://gateway.arifpay.org`.
+
+Manual invocation:
+```http
+POST /functions/v1/arifpay-sandbox-smoke-test
+Authorization: Bearer <platform-owner access token>
+apikey: <Supabase publishable/anon key>
+Content-Type: application/json
+
+{"flow":"hosted_session","sim_mode":"SUCCESS"}
+```
+
+Other supported tests:
+- `{"flow":"telebirr_direct","sim_mode":"SUCCESS"}`
+- `{"flow":"telebirr_direct","sim_mode":"FAIL"}`
+
+Every response explicitly reports `sandbox_only=true`, `live_charges_possible=false`, `order_created=false`, and `payment_record_created=false`. A created hosted session is not a successful payment. Do not use the sandbox webhook as a production webhook.
+
+ArifPay's public docs advertise advanced subaccounts, fees and settlements, but the published sandbox collection does not demonstrate split/subaccount calls. Production checkout, payment verification, signed production webhooks, subaccount setup, split distribution, and organizer payouts are intentionally not implemented. Keep the ArifPay provider registry row disabled (`contract_required`; checkout/split/payout flags false) until ArifPay supplies current production schemas, merchant credentials, and written confirmation of marketplace settlement permissions.
+
+GitHub PR review and a real authenticated sandbox POST are still required before considering the probe fully verified. No customer checkout, payment, payout, refund, or Tiqet financial record was created during deployment.
