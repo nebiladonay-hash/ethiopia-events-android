@@ -35,7 +35,7 @@ The remote schema contains 24 public tables; all observed public tables have RLS
 
 ## Active Edge Functions
 
-The following 13 functions were ACTIVE in TIQET-production at the November 21 verification:
+The following 14 functions were ACTIVE in TIQET-production at the November 21 verification:
 
 - `create-payment-intent`
 - `create-chapa-checkout`
@@ -52,7 +52,7 @@ The following 13 functions were ACTIVE in TIQET-production at the November 21 ve
 - `arifpay-sandbox-smoke-test` (platform-owner JWT required)
 - `arifpay-sandbox-webhook` (JWT disabled; accepts sandbox JSON only and performs no financial writes)
 
-The list contains 14 functions (the latest deployment audit also confirmed the existing refund and Tiqet Control functions). The Chapa webhook has JWT verification disabled at the gateway because it validates the provider HMAC signature on the exact raw request body itself. The ArifPay sandbox webhook also has JWT verification disabled, but it is deliberately non-financial: it only validates JSON, logs allow-listed sandbox metadata, and never changes Tiqet records.
+The Chapa webhook has JWT verification disabled at the gateway because it validates the provider HMAC signature on the exact raw request body itself. The ArifPay sandbox webhook also has JWT verification disabled, but it is deliberately non-financial: it only validates JSON, logs allow-listed sandbox metadata, and never changes Tiqet records.
 
 ## Provider activation
 
