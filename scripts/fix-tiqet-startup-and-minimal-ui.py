@@ -902,6 +902,7 @@ main = quality_replace(
                                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))''',
     '''                                    if (checkout.optBoolean("already_paid")) {
                                         bookingError = "Payment is already confirmed. Open the Tickets tab to view your tickets."
+                                        rotateCheckoutAttemptKey()
                                     } else {
                                         val url = checkout.optString("checkout_url")
                                         if (url.isBlank()) throw IllegalStateException("Payment provider did not return a checkout link.")
@@ -918,7 +919,7 @@ main = quality_replace(
                                 // An explicit provider rejection closes the original hold. A transport
                                 // timeout keeps the same key so a retry cannot reserve tickets twice.
                                 if (error is TiqetApi.ApiException && error.httpCode == 502) {
-                                    checkoutAttemptKey = java.util.UUID.randomUUID().toString()
+                                    rotateCheckoutAttemptKey()
                                 }
                                 bookingError = api.userFacingError(error, "Unable to start checkout.")
                             } finally { bookingBusy = false }''',
