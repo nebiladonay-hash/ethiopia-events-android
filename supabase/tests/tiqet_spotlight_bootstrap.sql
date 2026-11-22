@@ -188,7 +188,8 @@ begin
   end if;
   return jsonb_build_object(
     'pending_events',(select count(*) from public.events where status='submitted'::public.event_status and approval_status='pending'),
-    'published_events',(select count(*) from public.events where status='published'::public.event_status and approval_status='approved')
+    'published_events',(select count(*) from public.events where status='published'::public.event_status and approval_status='approved'),
+    'review_queue',0
   );
 end;
 $function$;
