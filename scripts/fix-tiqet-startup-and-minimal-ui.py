@@ -475,7 +475,7 @@ def quality_replace(source: str, old: str, new: str, label: str) -> str:
 main = main_path.read_text()
 main = quality_replace(
     main,
-    'val categories = listOf("All", "Music", "Comedy", "Culture", "Nightlife")',
+    'val categories = listOf("All", "Music", "Boxing Matches", "Culture", "Nightlife")',
     'val categories = listOf("All", "Music", "Boxing Matches", "Sports", "Culture", "Nightlife", "Conference", "Other")',
     "Customer event categories"
 )
