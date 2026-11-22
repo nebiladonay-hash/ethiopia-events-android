@@ -651,6 +651,90 @@ private fun BottomBar(items: List<String>, selected: String, onSelect: (String) 
 main = replace_function_by_braces(main, "private fun BottomBar(", bottom_bar)
 main_path.write_text(main)
 
+# Event details use the real organiser poster and clear, low-noise ticket selection.
+main = main_path.read_text()
+old_hero = """        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(200.dp)
+                .clip(RoundedCornerShape(22.dp))
+                .background(BrandRed),
+            contentAlignment = Alignment.Center
+        ) {
+            TicketMark(color = BrandIvory.copy(alpha = 0.9f), modifier = Modifier.size(86.dp))
+        }"""
+new_hero = """        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(200.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(BrandRed),
+            contentAlignment = Alignment.Center
+        ) {
+            if (!event.imageUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = event.imageUrl,
+                    contentDescription = event.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                TicketMark(color = BrandIvory.copy(alpha = 0.9f), modifier = Modifier.size(72.dp))
+            }
+        }"""
+main = quality_replace(main, old_hero, new_hero, "Use organiser poster on event detail")
+main = quality_replace(
+    main,
+    'Text(event.category.uppercase() + "  ·  " + event.tag, color = BrandRed, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)',
+    'Text(event.category, color = BrandRed, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)',
+    "Remove category and LIVE status filler"
+)
+main = quality_replace(
+    main,
+    'Text("EVENT DETAILS", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)',
+    'Text("Event details", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)',
+    "Title case event detail heading"
+)
+main = quality_replace(
+    main,
+    '                    Text(if (selected) "SELECTED" else "CHOOSE", color = if (selected) BrandRed else Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)',
+    '',
+    "Remove redundant ticket-selection badge text"
+)
+# The card border/fill is the selected state; a redundant all-caps label is unnecessary.
+main = quality_replace(
+    main,
+    '            RedActionButton(\n                text = if (bookingBusy) "Loading…" else "Continue",',
+    '            RedActionButton(\n                text = if (bookingBusy) "Opening checkout…" else "Continue",',
+    "Use clear checkout progress copy"
+)
+main = quality_replace(
+    main,
+    '                modifier = Modifier.width(150.dp)\n            )',
+    '                modifier = Modifier.width(150.dp),\n                enabled = !bookingBusy\n            )',
+    "Disable checkout action while a request is running"
+)
+# A second in-flight guard protects against repeated taps before recomposition.
+main = quality_replace(
+    main,
+    '                onClick = {\n                    val ticketTypeId = chosenTicketTypeId',
+    '                onClick = {\n                    if (bookingBusy) return@RedActionButton\n                    val ticketTypeId = chosenTicketTypeId',
+    "Prevent repeated checkout dispatch"
+)
+main = quality_replace(
+    main,
+    'private fun RedActionButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {',
+    'private fun RedActionButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {',
+    "Add a real enabled state to the primary action"
+)
+main = quality_replace(
+    main,
+    '            .background(BrandRed)\n            .clickable(onClick = onClick)',
+    '            .background(if (enabled) BrandRed else Muted)\n            .clickable(enabled = enabled, onClick = onClick)',
+    "Apply enabled state to the primary action surface"
+)
+main_path.write_text(main)
+
 auth = auth_path.read_text()
 if "import androidx.compose.ui.text.input.KeyboardCapitalization\n" not in auth:
     auth = quality_replace(
