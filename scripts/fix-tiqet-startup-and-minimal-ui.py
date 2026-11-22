@@ -865,27 +865,29 @@ api_path.write_text(api)
 main = main_path.read_text()
 main = quality_replace(
     main,
-    '    var bookingError by remember { mutableStateOf("") }\n',
-    '    var bookingError by remember { mutableStateOf("") }\n    var checkoutAttemptKey by remember(event.id) { mutableStateOf(java.util.UUID.randomUUID().toString()) }\n',
-    "Persist one checkout attempt key for the event detail session"
-)
-main = quality_replace(
-    main,
-    'clickable { selectedTicketOption = option }',
-    'clickable { selectedTicketOption = option; checkoutAttemptKey = java.util.UUID.randomUUID().toString() }',
-    "New checkout key when ticket tier changes"
-)
-main = quality_replace(
-    main,
-    'if (ticketCount > 1) ticketCount--',
-    'if (ticketCount > 1) { ticketCount--; checkoutAttemptKey = java.util.UUID.randomUUID().toString() }',
-    "New checkout key when quantity decreases"
-)
-main = quality_replace(
-    main,
-    'if (ticketCount < 10) ticketCount++',
-    'if (ticketCount < 10) { ticketCount++; checkoutAttemptKey = java.util.UUID.randomUUID().toString() }',
-    "New checkout key when quantity increases"
+    '    val context = LocalContext.current\n',
+    '''    val context = LocalContext.current
+    val checkoutPreferences = remember(context) {
+        context.getSharedPreferences("tiqet_checkout_attempts", android.content.Context.MODE_PRIVATE)
+    }
+    val checkoutAttemptStorageKey = remember(event.id, selectedTicketOption?.id, ticketCount) {
+        "checkout:" + event.id + ":" + (selectedTicketOption?.id ?: event.ticketTypeId ?: "default") + ":" + ticketCount
+    }
+    var checkoutAttemptKey by remember(checkoutAttemptStorageKey) {
+        mutableStateOf(
+            checkoutPreferences.getString(checkoutAttemptStorageKey, null)
+                ?: java.util.UUID.randomUUID().toString().also { generated ->
+                    checkoutPreferences.edit().putString(checkoutAttemptStorageKey, generated).apply()
+                }
+        )
+    }
+    fun rotateCheckoutAttemptKey() {
+        val nextKey = java.util.UUID.randomUUID().toString()
+        checkoutAttemptKey = nextKey
+        checkoutPreferences.edit().putString(checkoutAttemptStorageKey, nextKey).apply()
+    }
+''',
+    "Persist checkout key by event, ticket tier and quantity"
 )
 main = quality_replace(
     main,
