@@ -24,7 +24,7 @@ Deno.serve(async (req) => {
   const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } })
   const { data: auth, error: authError } = await userClient.auth.getUser()
   if (authError || !auth.user) return json({ error: 'Invalid or expired session' }, 401)
-  let body: { provider?: string; ticket_type_id?: string; quantity?: number; payment_method?: string }
+  let body: { provider?: string; ticket_type_id?: string; quantity?: number; payment_method?: string; idempotency_key?: string }
   try { body = await req.json() } catch { return json({ error: 'Invalid JSON body' }, 400) }
   const provider = (body.provider ?? 'chapa').trim().toLowerCase()
   const capability = PROVIDER_CAPABILITIES.find((item) => item.provider === provider)
@@ -40,11 +40,15 @@ Deno.serve(async (req) => {
   if (!body.ticket_type_id || !Number.isInteger(body.quantity) || (body.quantity ?? 0) < 1 || (body.quantity ?? 0) > 10) {
     return json({ error: 'ticket_type_id and quantity from 1 to 10 are required' }, 400)
   }
+  const idempotencyKey = body.idempotency_key ?? crypto.randomUUID()
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
+    return json({ error: 'A valid checkout request key is required' }, 400)
+  }
   if (provider === 'chapa') {
     const response = await fetch(`${supabaseUrl}/functions/v1/create-chapa-checkout`, {
       method: 'POST',
       headers: { Authorization: authorization, apikey: anonKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticket_type_id: body.ticket_type_id, quantity: body.quantity, payment_method: body.payment_method }),
+      body: JSON.stringify({ ticket_type_id: body.ticket_type_id, quantity: body.quantity, payment_method: body.payment_method, idempotency_key: idempotencyKey }),
     })
     const responseText = await response.text()
     return new Response(responseText, { status: response.status,
