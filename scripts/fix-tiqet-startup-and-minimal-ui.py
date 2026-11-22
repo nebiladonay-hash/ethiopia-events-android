@@ -677,9 +677,9 @@ def normalize_email_in_method(source: str, start_signature: str, end_signature: 
     if end < 0:
         raise SystemExit(f"{label}: method end not found")
     method = source[start:end]
-    if re.search(r'email\\.trim\\(\\)\\.lowercase\\(', method):
+    if re.search(r'email\.trim\(\)\.lowercase\(', method):
         return source
-    updated, count = re.subn(r'email\\.trim\\(\\)', 'email.trim().lowercase(Locale.ROOT)', method, count=1)
+    updated, count = re.subn(r'email\.trim\(\)', 'email.trim().lowercase(Locale.ROOT)', method, count=1)
     if count != 1:
         raise SystemExit(f"{label}: could not normalize email input safely")
     return source[:start] + updated + source[end:]
