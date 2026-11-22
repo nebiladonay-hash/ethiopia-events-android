@@ -1253,7 +1253,6 @@ fun TiqetPasswordResetScreen(
     }
 }
 '''
-reset_screen_path.write_text_text = None
 reset_screen_path.parent.mkdir(parents=True, exist_ok=True)
 reset_screen_path.write_text(reset_screen)
 print("Added complete Supabase password recovery and new-password flow.")
