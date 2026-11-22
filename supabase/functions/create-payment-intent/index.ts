@@ -1,5 +1,12 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1'
-import { PROVIDER_CAPABILITIES } from '../_shared/provider-catalog.ts'
+export const PROVIDER_CAPABILITIES = [
+  { provider: 'chapa', name: 'Chapa', adapter: 'ready', enabledByDefault: true, marketSplit: true, organiserPayouts: true, methodsSource: 'live_merchant_api' },
+  { provider: 'arifpay', name: 'ArifPay', adapter: 'contract_required', enabledByDefault: false, marketSplit: false, organiserPayouts: false, methodsSource: 'not_connected' },
+  { provider: 'fenanpay', name: 'FenanPay', adapter: 'contract_required', enabledByDefault: false, marketSplit: false, organiserPayouts: false, methodsSource: 'not_connected' },
+  { provider: 'santimpay', name: 'SantimPay', adapter: 'contract_required', enabledByDefault: false, marketSplit: false, organiserPayouts: false, methodsSource: 'not_connected' },
+  { provider: 'yagoutpay', name: 'YagoutPay', adapter: 'contract_required', enabledByDefault: false, marketSplit: false, organiserPayouts: false, methodsSource: 'not_connected' },
+] as const
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
