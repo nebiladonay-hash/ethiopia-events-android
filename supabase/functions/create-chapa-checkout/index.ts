@@ -37,17 +37,60 @@ Deno.serve(async (req) => {
   const { data: userResult, error: userError } = await userClient.auth.getUser()
   if (userError || !userResult.user) return json({ error: 'Invalid or expired session' }, 401)
 
-  let body: { ticket_type_id?: string; quantity?: number; payment_method?: string }
+  let body: { ticket_type_id?: string; quantity?: number; payment_method?: string; idempotency_key?: string }
   try { body = await req.json() } catch { return json({ error: 'Invalid JSON body' }, 400) }
   if (!body.ticket_type_id || !Number.isInteger(body.quantity) || (body.quantity ?? 0) < 1 || (body.quantity ?? 0) > 10) {
     return json({ error: 'ticket_type_id and quantity from 1 to 10 are required' }, 400)
   }
 
+  const idempotencyKey = body.idempotency_key ?? crypto.randomUUID()
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
+    return json({ error: 'A valid checkout request key is required' }, 400)
+  }
+
   const { data: hold, error: holdError } = await userClient.rpc('create_order_hold', {
     p_ticket_type_id: body.ticket_type_id,
     p_quantity: body.quantity,
+    p_idempotency_key: idempotencyKey,
   })
   if (holdError || !hold?.order_id) return json({ error: holdError?.message ?? 'Could not reserve tickets' }, 409)
+  if (hold.already_paid) {
+    return json({ order_id: hold.order_id, already_paid: true, order_status: hold.order_status })
+  }
+  if (hold.payment_review) {
+    return json({ error: 'This payment is being reviewed. Do not pay again; check your Tickets tab or contact support.', order_id: hold.order_id }, 409)
+  }
+
+  // A retry of the same request key must return the stored checkout link, or
+  // report that the original provider request is still in progress. Never
+  // create a second payment row or a second Chapa checkout for the same order.
+  const { data: existingPayment, error: existingPaymentError } = await admin
+    .from('payments')
+    .select('id, status, checkout_url')
+    .eq('order_id', hold.order_id)
+    .maybeSingle()
+  if (existingPaymentError) {
+    return json({ error: 'Could not verify the existing checkout. Check your Tickets tab before retrying.' }, 503)
+  }
+  if (existingPayment?.checkout_url) {
+    return json({
+      order_id: hold.order_id,
+      merchant_reference: hold.merchant_reference,
+      checkout_url: existingPayment.checkout_url,
+      subtotal_etb: hold.subtotal_etb,
+      service_fee_etb: hold.buyer_service_fee_etb,
+      total_etb: hold.total_etb,
+      hold_expires_at: hold.hold_expires_at,
+      idempotent_replay: true,
+    })
+  }
+  if (existingPayment) {
+    return json({
+      error: 'Your original checkout is still being prepared. Check your Tickets tab before trying again.',
+      order_id: hold.order_id,
+      idempotent_replay: true,
+    }, 409)
+  }
 
   const failHold = async (reason: string) => {
     await admin.rpc('fail_order_payment', { p_order_id: hold.order_id, p_reason: reason })
@@ -149,6 +192,28 @@ Deno.serve(async (req) => {
     },
   })
   if (paymentInsertError) {
+    // A concurrent request with the same client key may have created this
+    // unique order/payment row first. Return/reconcile it; do not fail its hold.
+    const { data: concurrentPayment } = await admin
+      .from('payments')
+      .select('id, checkout_url')
+      .eq('order_id', hold.order_id)
+      .maybeSingle()
+    if (concurrentPayment?.checkout_url) {
+      return json({
+        order_id: hold.order_id,
+        merchant_reference: hold.merchant_reference,
+        checkout_url: concurrentPayment.checkout_url,
+        subtotal_etb: hold.subtotal_etb,
+        service_fee_etb: hold.buyer_service_fee_etb,
+        total_etb: hold.total_etb,
+        hold_expires_at: hold.hold_expires_at,
+        idempotent_replay: true,
+      })
+    }
+    if (concurrentPayment) {
+      return json({ error: 'Your original checkout is still being prepared. Check your Tickets tab before trying again.', order_id: hold.order_id }, 409)
+    }
     await failHold('Could not persist payment attempt before provider initialization')
     return json({ error: 'Could not create the secure payment record. Please try again.' }, 500)
   }

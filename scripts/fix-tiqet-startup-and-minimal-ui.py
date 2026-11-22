@@ -1,0 +1,1258 @@
+#!/usr/bin/env python3
+"""Keep Tiqet launch responsive without replacing the established red/ivory wave UI."""
+from pathlib import Path
+import re
+import sys
+
+root = Path(sys.argv[1])
+main_path = root / "app/src/main/java/et/events/mobile/MainActivity.kt"
+api_path = root / "app/src/main/java/et/events/mobile/backend/TiqetApi.kt"
+
+main = main_path.read_text()
+
+# Preserve the original Tiqet role chooser and ticket cards. Do not restyle them here.
+# This script only decouples Spotlight loading from the main event request.
+spotlight_pattern = re.compile(
+    r'(?ms)^(?P<indent>[ \t]*)spotlightEvents = try \{\n'
+    r'.*?^(?P=indent)eventLoadError = ""\n'
+)
+main, count = spotlight_pattern.subn(
+    lambda match: match.group("indent") + 'eventLoadError = ""\n',
+    main,
+    count=1
+)
+if count != 1:
+    raise SystemExit("Could not isolate Spotlight loading from the main Discover load.")
+
+selected_tab = '    var selectedTab by remember { mutableStateOf(BuyerTab.DISCOVER) }'
+spotlight_effect = r'''
+    LaunchedEffect(api) {
+        spotlightEvents = try {
+            withContext(Dispatchers.IO) {
+                api.fetchSpotlightEvents().map { featured ->
+                    val event = featured.event
+                    EventCardModel(
+                        id = event.id,
+                        title = event.title,
+                        description = event.description,
+                        category = event.category,
+                        date = formatAddisDate(event.startsAt),
+                        venue = listOf(event.venueName, event.city).filter { it.isNotBlank() }.joinToString(" · "),
+                        price = event.minimumPriceEtb ?: 0.0,
+                        ticketName = event.ticketTypeName ?: "Admission",
+                        tag = "SPOTLIGHT",
+                        ticketTypeId = event.ticketTypeId,
+                        imageUrl = event.imageUrl,
+                        featuredLabel = featured.featuredLabel
+                    )
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+'''
+if main.count(selected_tab) != 1:
+    raise SystemExit("BuyerApp selected-tab insertion point is missing or ambiguous.")
+main = main.replace(selected_tab, spotlight_effect + selected_tab, 1)
+
+# Restore the established Tiqet red/ivory role chooser and ticket cards after the older UI patch.
+role_chooser = r'''@Composable
+private fun RoleChooser(onChoose: (String) -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BrandIvory)
+            .systemBarsPadding()
+            .padding(horizontal = 24.dp, vertical = 25.dp)
+    ) {
+        BrandStamp()
+        Spacer(Modifier.weight(1f))
+        RoleCard(
+            label = "I'm here to discover and book events.",
+            isBuyer = true,
+            onClick = { onChoose("buyer") }
+        )
+        Spacer(Modifier.height(13.dp))
+        RoleCard(
+            label = "I'm here to organise events.",
+            isBuyer = false,
+            onClick = { onChoose("organizer") }
+        )
+        Spacer(Modifier.weight(1.15f))
+    }
+}
+'''
+
+role_card = r'''@Composable
+private fun RoleCard(label: String, isBuyer: Boolean, onClick: () -> Unit) {
+    val background = if (isBuyer) BrandRed else BrandIvory
+    val foreground = if (isBuyer) BrandIvory else BrandRed
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(133.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(background)
+            .then(
+                if (isBuyer) Modifier else Modifier.border(1.4.dp, BrandRed, RoundedCornerShape(22.dp))
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 21.dp, vertical = 20.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = label,
+                color = foreground,
+                fontSize = 17.sp,
+                lineHeight = 23.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f).padding(end = 14.dp)
+            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                TicketMark(color = foreground, modifier = Modifier.size(37.dp))
+                Text("↗", color = foreground, fontSize = 19.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+'''
+
+def replace_function_by_braces(source: str, signature: str, replacement: str) -> str:
+    fn_start = source.find(signature)
+    if fn_start < 0:
+        raise SystemExit(f"Missing source function: {signature}")
+    annotation = source.rfind("@Composable", 0, fn_start)
+    start = annotation if annotation >= 0 and fn_start - annotation < 50 else fn_start
+    opening = source.find("{", fn_start + len(signature))
+    if opening < 0:
+        raise SystemExit(f"Missing body for source function: {signature}")
+    depth = 0
+    closing = -1
+    for index in range(opening, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                closing = index + 1
+                break
+    if closing < 0:
+        raise SystemExit(f"Unbalanced body for source function: {signature}")
+    return source[:start] + replacement.rstrip() + source[closing:]
+
+main = replace_function_by_braces(main, "private fun RoleChooser(", role_chooser)
+main = replace_function_by_braces(main, "private fun RoleCard(", role_card)
+
+# The full-refresh patch removed the original ticket glyph while the restored cards still use it.
+ticket_imports = [
+    "import androidx.compose.foundation.Canvas\n",
+    "import androidx.compose.ui.geometry.CornerRadius\n",
+    "import androidx.compose.ui.geometry.Offset\n",
+    "import androidx.compose.ui.geometry.Size\n",
+    "import androidx.compose.ui.graphics.PathEffect\n",
+    "import androidx.compose.ui.graphics.drawscope.Stroke\n",
+]
+for import_line in ticket_imports:
+    if import_line not in main:
+        if import_line.startswith("import androidx.compose.foundation."):
+            anchor = "import androidx.compose.foundation.background\n"
+        elif import_line.startswith("import androidx.compose.ui.geometry."):
+            anchor = "import androidx.compose.ui.graphics.Color\n"
+        else:
+            anchor = "import androidx.compose.ui.graphics.PathEffect\n" if "drawscope" in import_line else "import androidx.compose.ui.geometry.Size\n"
+        if main.count(anchor) != 1:
+            raise SystemExit(f"Missing or ambiguous import insertion point: {anchor.strip()}")
+        main = main.replace(anchor, anchor + import_line, 1)
+
+if "private fun TicketMark(" not in main:
+    ticket_mark = r'''@Composable
+private fun TicketMark(color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val left = size.width * 0.12f
+        val top = size.height * 0.21f
+        val width = size.width * 0.76f
+        val height = size.height * 0.58f
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(left, top),
+            size = Size(width, height),
+            cornerRadius = CornerRadius(5.dp.toPx()),
+            style = Stroke(width = 1.7.dp.toPx())
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.5f, top + 2.dp.toPx()),
+            end = Offset(size.width * 0.5f, top + height - 2.dp.toPx()),
+            strokeWidth = 1.4.dp.toPx(),
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx()))
+        )
+    }
+}
+
+'''
+    insert_at = main.find("private data class EventCardModel(")
+    if insert_at < 0:
+        raise SystemExit("Could not find EventCardModel insertion point for ticket glyph.")
+    main = main[:insert_at] + ticket_mark + main[insert_at:]
+
+# Fail the build if a future edit silently swaps out the original Tiqet entry UI.
+if "private fun RoleChooser" not in main or "I'm here to discover and book events." not in main:
+    raise SystemExit("Original Tiqet role chooser text is missing; refusing an unintended entry UI replacement.")
+if "private fun RoleCard" not in main or "TicketMark(color = foreground" not in main:
+    raise SystemExit("Original Tiqet red/ivory ticket cards are missing.")
+if 'Make room for good plans.' in main:
+    raise SystemExit("Unapproved minimalist role-chooser replacement detected.")
+main_path.write_text(main)
+
+# Expired-token refresh gets one retry only, never an unbounded recursive retry.
+api = api_path.read_text()
+old_signature = '''        useSession: Boolean = true,
+        prefer: String? = null
+    ): JSONObject {'''
+new_signature = '''        useSession: Boolean = true,
+        prefer: String? = null,
+        retryAuth: Boolean = true
+    ): JSONObject {'''
+if api.count(old_signature) != 1:
+    raise SystemExit(f"Request signature anchor expected once; found {api.count(old_signature)}.")
+api = api.replace(old_signature, new_signature, 1)
+
+old_auth = '''                if (code == 401 && useSession && currentSession() != null) {
+                    val refreshed = refreshSession()
+                    if (refreshed != null) return request(method, path, body, true, prefer)
+                }'''
+new_auth = '''                if (code == 401 && useSession && retryAuth && currentSession() != null) {
+                    val refreshed = refreshSession()
+                    if (refreshed != null) return request(method, path, body, true, prefer, retryAuth = false)
+                }'''
+if api.count(old_auth) != 1:
+    raise SystemExit(f"401 retry anchor expected once; found {api.count(old_auth)}.")
+api = api.replace(old_auth, new_auth, 1)
+api_path.write_text(api)
+
+print("Original Tiqet red/ivory ticket-card UI preserved; Spotlight loads independently; Supabase 401 refresh is bounded to one retry.")
+
+
+# --- Restore the classic Tiqet red/ivory wave identity and normalize auth scrolling. ---
+main_path = root / "app/src/main/java/et/events/mobile/MainActivity.kt"
+auth_path = root / "app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
+organiser_path = root / "app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
+brand_path = root / "app/src/main/java/et/events/mobile/TiqetBrand.kt"
+
+main = main_path.read_text()
+for old, new, label in (
+    ("private val BrandRed = Color(0xFF940A2D)", "private val BrandRed = Color(0xFFB82035)", "Classic main red"),
+    ("private val BrandIvory = Color(0xFFF6F0ED)", "private val BrandIvory = Color(0xFFF7F1E7)", "Classic main ivory"),
+    ("private val Ink = Color(0xFF282226)", "private val Ink = Color(0xFF2B2020)", "Classic main ink"),
+    ("private val Muted = Color(0xFF756C70)", "private val Muted = Color(0xFF8C7771)", "Classic muted text"),
+    ("private val Hairline = Color(0xFFE9E4DE)", "private val Hairline = Color(0xFFE6D9CB)", "Classic separators"),
+    ("private val SoftIvory = Color(0xFFFFFFFF)", "private val SoftIvory = Color(0xFFFFFBF5)", "Classic card surface"),
+    ("window.statusBarColor = android.graphics.Color.rgb(148, 10, 45)", "window.statusBarColor = android.graphics.Color.rgb(184, 32, 53)", "Classic status bar"),
+    ("window.navigationBarColor = android.graphics.Color.rgb(246, 240, 237)", "window.navigationBarColor = android.graphics.Color.rgb(247, 241, 231)", "Classic navigation bar"),
+):
+    main = main.replace(old, new, 1) if old in main else main
+    if new not in main:
+        raise SystemExit(f"{label}: expected palette value is absent.")
+main_path.write_text(main)
+
+brand_stamp = r'''@Composable
+private fun BrandStamp() {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+        Box(
+            modifier = Modifier
+                .size(11.dp)
+                .clip(CircleShape)
+                .background(BrandRed)
+        )
+        Text(
+            text = "TIQET",
+            color = BrandRed,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = 3.sp
+        )
+    }
+}
+'''
+main = replace_function_by_braces(main, "private fun BrandStamp(", brand_stamp)
+
+role_chooser = r'''@Composable
+private fun RoleChooser(onChoose: (String) -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BrandIvory)
+            .systemBarsPadding()
+    ) {
+        TiqetWaveHeader(
+            title = "Welcome to Tiqet",
+            subtitle = "Discover events or organise your own.",
+            height = 174.dp
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(horizontal = 24.dp, vertical = 22.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            RoleCard(
+                label = "I'm here to discover and book events.",
+                isBuyer = true,
+                onClick = { onChoose("buyer") }
+            )
+            Spacer(Modifier.height(13.dp))
+            RoleCard(
+                label = "I'm here to organise events.",
+                isBuyer = false,
+                onClick = { onChoose("organizer") }
+            )
+        }
+    }
+}
+'''
+main = replace_function_by_braces(main, "private fun RoleChooser(", role_chooser)
+main_path.write_text(main)
+
+for path, prefix in ((auth_path, "Auth"), (organiser_path, "Org")):
+    source = path.read_text()
+    for name, old, new in (
+        ("Red", "940A2D", "B82035"),
+        ("Ivory", "F6F0ED", "F7F1E7"),
+        ("Ink", "282226", "2B2020"),
+        ("Muted", "756C70", "8C7771"),
+    ):
+        old_line = f"private val {prefix}{name} = Color(0xFF{old})"
+        new_line = f"private val {prefix}{name} = Color(0xFF{new})"
+        if old_line in source:
+            source = source.replace(old_line, new_line, 1)
+        elif new_line not in source:
+            raise SystemExit(f"Missing {prefix}{name} palette definition.")
+    path.write_text(source)
+
+# One scroll owner on the auth root; the IME and system bars are handled once.
+auth = auth_path.read_text()
+auth_lines = []
+seen_imports = set()
+for line in auth.splitlines(keepends=True):
+    if line.startswith("import "):
+        if line in seen_imports:
+            continue
+        seen_imports.add(line)
+    auth_lines.append(line)
+auth = "".join(auth_lines)
+auth_root = re.compile(
+    r"(?ms)^    Column\(\n        modifier = Modifier\n.*?^        verticalArrangement = Arrangement\.(?:Center|Top)\n    \) \{"
+)
+auth_match = auth_root.search(auth)
+if not auth_match:
+    raise SystemExit("Could not find the signup/login root Column for scroll normalization.")
+clean_auth_root = '''    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AuthIvory)
+            .systemBarsPadding()
+            .imePadding()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.Top
+    ) {'''
+auth = auth[:auth_match.start()] + clean_auth_root + auth[auth_match.end():]
+if auth.count(".verticalScroll(rememberScrollState())") != 1:
+    raise SystemExit("Auth screen must contain exactly one vertical scroll modifier.")
+if auth.count("import androidx.compose.foundation.verticalScroll\n") != 1:
+    raise SystemExit("Auth verticalScroll import is duplicated or missing.")
+if auth.count("import androidx.compose.foundation.rememberScrollState\n") != 1:
+    raise SystemExit("Auth rememberScrollState import is duplicated or missing.")
+auth_path.write_text(auth)
+
+brand = brand_path.read_text()
+for old, new, label in (
+    ("private val TiqetCrimson = Color(0xFF940A2D)", "private val TiqetCrimson = Color(0xFFB82035)", "Classic wave crimson"),
+    ("private val TiqetCherry = Color(0xFFB9153F)", "private val TiqetCherry = Color(0xFFD04A5D)", "Classic wave cherry"),
+    ("private val TiqetBurgundy = Color(0xFF5A071F)", "private val TiqetBurgundy = Color(0xFF981C32)", "Classic wave shade"),
+    ("private val TiqetIvory = Color(0xFFF6F0ED)", "private val TiqetIvory = Color(0xFFF7F1E7)", "Classic wave ivory"),
+):
+    brand = brand.replace(old, new, 1) if old in brand else brand
+    if new not in brand:
+        raise SystemExit(f"{label}: expected palette value is absent.")
+
+ribbon_start = brand.find("            // A quiet ribbon inside the red field")
+edge_start = brand.find("            val edge = Path()", ribbon_start)
+if ribbon_start >= 0 and edge_start > ribbon_start:
+    brand = brand[:ribbon_start] + brand[edge_start:]
+elif "val ribbon = Path()" in brand or "val zigzag = Path()" in brand:
+    raise SystemExit("Could not safely remove the wave decoration paths.")
+
+old_header_mark = '''                TiqetBrandMark(
+                    modifier = Modifier.width(30.dp).height(25.dp),
+                    ticketColor = TiqetIvory,
+                    cutoutColor = TiqetBurgundy
+                )
+                Text("Tiqet", color = TiqetIvory, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.35).sp)'''
+new_header_mark = '''                Text("TIQET", color = TiqetIvory, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 2.4.sp)'''
+if old_header_mark in brand:
+    brand = brand.replace(old_header_mark, new_header_mark, 1)
+elif new_header_mark not in brand:
+    raise SystemExit("Could not restore the simple TIQET wordmark in the wave header.")
+brand_path.write_text(brand)
+
+
+# Restore the previous text-led bottom navigation instead of the newer icon-heavy refresh.
+main = main_path.read_text()
+bottom_bar = r'''@Composable
+private fun BottomBar(items: List<String>, selected: String, onSelect: (String) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.White)
+            .border(BorderStroke(0.7.dp, Hairline))
+            .padding(horizontal = 5.dp, vertical = 7.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        items.forEach { item ->
+            Column(
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { onSelect(item) }.padding(vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Box(modifier = Modifier.width(22.dp).height(3.dp).clip(RoundedCornerShape(50)).background(if (item == selected) BrandRed else Color.Transparent))
+                Text(
+                    item,
+                    color = if (item == selected) BrandRed else Muted,
+                    fontSize = 10.sp,
+                    fontWeight = if (item == selected) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+'''
+main = replace_function_by_braces(main, "private fun BottomBar(", bottom_bar)
+main_path.write_text(main)
+
+main = main_path.read_text()
+auth = auth_path.read_text()
+brand = brand_path.read_text()
+assert "private val BrandRed = Color(0xFFB82035)" in main
+assert "private val BrandIvory = Color(0xFFF7F1E7)" in main
+assert "TiqetWaveHeader(" in main[main.find("private fun RoleChooser"):main.find("private fun RoleCard")]
+assert "I'm here to discover and book events." in main
+assert "TicketMark(color = foreground" in main
+assert "private val TiqetCrimson = Color(0xFFB82035)" in brand
+assert "val zigzag = Path()" not in brand and "val ribbon = Path()" not in brand
+assert auth.count(".verticalScroll(rememberScrollState())") == 1
+assert auth.count("import androidx.compose.foundation.verticalScroll\n") == 1
+assert auth.count("import androidx.compose.foundation.rememberScrollState\n") == 1
+print("Classic Tiqet red/ivory ticket-card UI and clean wave header restored; duplicate auth scrolling removed.")
+
+# Rebuild trigger: APK is uploaded immediately after compilation, before launch verification.
+
+
+# Rebuild trigger: publish APK before emulator check.
+
+
+# ---------------------------------------------------------------------------
+# TIQET quality pass: production-minded UI details after all legacy patches.
+# This executes last in the build pipeline so the design system is consistent.
+# ---------------------------------------------------------------------------
+auth_path = root / "app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
+organiser_path = root / "app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
+
+def quality_replace(source: str, old: str, new: str, label: str) -> str:
+    count = source.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected one exact source anchor; found {count}")
+    return source.replace(old, new, 1)
+
+main = main_path.read_text()
+main = quality_replace(
+    main,
+    'val categories = listOf("All", "Music", "Boxing Matches", "Culture", "Nightlife")',
+    'val categories = listOf("All", "Music", "Boxing Matches", "Sports", "Culture", "Nightlife", "Conference", "Other")',
+    "Customer event categories"
+)
+main = quality_replace(main, "Search events or artists", "Search events, venues or categories", "Search hint")
+main = quality_replace(
+    main,
+    '(search.isBlank() || event.title.contains(search, ignoreCase = true) || event.category.contains(search, ignoreCase = true))',
+    '(search.isBlank() || event.title.contains(search, ignoreCase = true) || event.category.contains(search, ignoreCase = true) || event.venue.contains(search, ignoreCase = true) || event.description.contains(search, ignoreCase = true))',
+    "Search titles, categories, venues and descriptions"
+)
+main = quality_replace(
+    main,
+    'Text(if (isLoading) "UPDATING" else "ETB · LIVE LISTINGS", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)',
+    'Text(if (isLoading) "Loading" else filtered.size.toString() + " events", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)',
+    "Replace filler listing badge with actual count"
+)
+main = quality_replace(
+    main,
+    '''                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+private fun CategoryChip''',
+    '''                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        if (value.isNotBlank()) {
+            Text(
+                "×",
+                color = Muted,
+                fontSize = 20.sp,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable { onValueChange("") }
+                    .padding(horizontal = 4.dp, vertical = 2.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun CategoryChip''',
+    "Add one-tap clear search"
+)
+if "import androidx.compose.material3.CircularProgressIndicator\n" not in main:
+    main = quality_replace(
+        main,
+        "import androidx.compose.material3.MaterialTheme\n",
+        "import androidx.compose.material3.MaterialTheme\nimport androidx.compose.material3.CircularProgressIndicator\n",
+        "Loading indicator import"
+    )
+main = quality_replace(
+    main,
+    'EmptyMessage("Loading live events from Tiqet…")',
+    '''Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(25.dp),
+                        color = BrandRed,
+                        strokeWidth = 2.5.dp
+                    )
+                    Text("Finding events", color = Muted, fontSize = 12.sp)
+                }''',
+    "Customer loading state"
+)
+main = main.replace(
+    'Text(event.category.uppercase(), color = BrandRed, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)',
+    'Text(event.category, color = BrandRed, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)',
+    1
+)
+
+spotlight_section = r'''@Composable
+private fun SpotlightSection(events: List<EventCardModel>, onOpenEvent: (EventCardModel) -> Unit) {
+    Column {
+        Text("Spotlight", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            events.forEach { event -> SpotlightBannerCard(event = event, onClick = { onOpenEvent(event) }) }
+        }
+    }
+}
+'''
+spotlight_card = r'''@Composable
+private fun SpotlightBannerCard(event: EventCardModel, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .width(292.dp)
+            .height(190.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(BrandRed)
+            .clickable(onClick = onClick)
+    ) {
+        if (!event.imageUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = event.imageUrl,
+                contentDescription = event.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        }
+        Box(Modifier.fillMaxSize().background(Color(0x770D080B)))
+        Column(
+            modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(17.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text(
+                event.title,
+                color = Color.White,
+                fontSize = 20.sp,
+                lineHeight = 24.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                listOf(event.date, event.venue).filter { it.isNotBlank() }.joinToString(" · "),
+                color = Color.White.copy(alpha = 0.94f),
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+'''
+main = replace_function_by_braces(main, "private fun SpotlightSection(", spotlight_section)
+main = replace_function_by_braces(main, "private fun SpotlightBannerCard(", spotlight_card)
+
+bottom_bar = r'''@Composable
+private fun BottomBar(items: List<String>, selected: String, onSelect: (String) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.White)
+            .border(BorderStroke(0.7.dp, Hairline))
+            .padding(horizontal = 5.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        items.forEach { item ->
+            val tint = if (item == selected) BrandRed else Muted
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onSelect(item) }
+                    .padding(vertical = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                when (item) {
+                    "Discover" -> Icon(Icons.Outlined.Explore, contentDescription = "Discover", tint = tint, modifier = Modifier.size(21.dp))
+                    "Tickets" -> Icon(Icons.Outlined.ConfirmationNumber, contentDescription = "Tickets", tint = tint, modifier = Modifier.size(21.dp))
+                    "Saved" -> Icon(Icons.Outlined.BookmarkBorder, contentDescription = "Saved", tint = tint, modifier = Modifier.size(21.dp))
+                    "Profile" -> Icon(Icons.Outlined.PersonOutline, contentDescription = "Profile", tint = tint, modifier = Modifier.size(21.dp))
+                }
+                Text(item, color = tint, fontSize = 10.sp, fontWeight = if (item == selected) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
+                Box(
+                    modifier = Modifier
+                        .width(18.dp)
+                        .height(2.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(if (item == selected) BrandRed else Color.Transparent)
+                )
+            }
+        }
+    }
+}
+'''
+main = replace_function_by_braces(main, "private fun BottomBar(", bottom_bar)
+main_path.write_text(main)
+
+# Event details use the real organiser poster and clear, low-noise ticket selection.
+main = main_path.read_text()
+detail_start = main.find("private fun EventDetailScreen(")
+detail_end = main.find("\n@Composable", detail_start + 1)
+if detail_start < 0 or detail_end < 0:
+    raise SystemExit("Could not locate the event detail screen for poster integration.")
+detail_region = main[detail_start:detail_end]
+header_start = detail_region.find("TiqetWaveHeader(")
+if header_start >= 0:
+    opening = detail_region.find("(", header_start)
+    depth = 0
+    quote = None
+    escaped = False
+    closing = -1
+    for position in range(opening, len(detail_region)):
+        ch = detail_region[position]
+        if quote:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                quote = None
+            continue
+        if ch in ('"', "'"):
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                closing = position
+                break
+    if closing < 0:
+        raise SystemExit("Could not find the end of the event-detail wave header.")
+    poster = """
+        Spacer(Modifier.height(10.dp))
+        if (!event.imageUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = event.imageUrl,
+                contentDescription = event.title,
+                modifier = Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(16.dp)),
+                contentScale = ContentScale.Crop
+            )
+        }
+"""
+    detail_region = detail_region[:closing + 1] + poster + detail_region[closing + 1:]
+elif "AsyncImage(" not in detail_region and "event.imageUrl" not in detail_region:
+    marker = "TicketMark(color = BrandIvory.copy(alpha = 0.9f), modifier = Modifier.size(86.dp))"
+    if marker not in detail_region:
+        raise SystemExit("Event detail has neither a wave header nor a recognised artwork placeholder.")
+    detail_region = detail_region.replace(
+        marker,
+        """if (!event.imageUrl.isNullOrBlank()) {
+                AsyncImage(model = event.imageUrl, contentDescription = event.title,
+                    modifier = Modifier.fillMaxWidth().height(200.dp), contentScale = ContentScale.Crop)
+            } else {
+                TicketMark(color = BrandIvory.copy(alpha = 0.9f), modifier = Modifier.size(72.dp))
+            }""",
+        1
+    )
+main = main[:detail_start] + detail_region + main[detail_end:]
+
+# The final wave patch already changes the detail header in some source revisions.
+# Apply the label cleanup only when the older text is still present.
+legacy_category = 'Text(event.category.uppercase() + "  ·  " + event.tag, color = BrandRed, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)'
+if legacy_category in main:
+    main = main.replace(
+        legacy_category,
+        'Text(event.category, color = BrandRed, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)',
+        1
+    )
+
+legacy_detail_heading = 'Text("EVENT DETAILS", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)'
+if legacy_detail_heading in main:
+    main = main.replace(
+        legacy_detail_heading,
+        'Text("Event details", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)',
+        1
+    )
+
+main = quality_replace(
+    main,
+    '                    Text(if (selected) "SELECTED" else "CHOOSE", color = if (selected) BrandRed else Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)',
+    '',
+    "Remove redundant ticket-selection badge text"
+)
+# The card border/fill is the selected state; a redundant all-caps label is unnecessary.
+main = quality_replace(
+    main,
+    '            RedActionButton(\n                text = if (bookingBusy) "Loading…" else "Continue",',
+    '            RedActionButton(\n                text = if (bookingBusy) "Opening checkout…" else "Continue",',
+    "Use clear checkout progress copy"
+)
+main = quality_replace(
+    main,
+    '                modifier = Modifier.width(150.dp)\n            )',
+    '                modifier = Modifier.width(150.dp),\n                enabled = !bookingBusy\n            )',
+    "Disable checkout action while a request is running"
+)
+# A second in-flight guard protects against repeated taps before recomposition.
+main = quality_replace(
+    main,
+    '                onClick = {\n                    val ticketTypeId = chosenTicketTypeId',
+    '                onClick = {\n                    if (bookingBusy) return@RedActionButton\n                    val ticketTypeId = chosenTicketTypeId',
+    "Prevent repeated checkout dispatch"
+)
+red_action_button = r'''@Composable
+private fun RedActionButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(50.dp)
+            .clip(RoundedCornerShape(13.dp))
+            .background(if (enabled) BrandRed else Muted)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 17.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text, color = BrandIvory, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    }
+}
+'''
+main = replace_function_by_braces(main, "private fun RedActionButton(", red_action_button)
+main_path.write_text(main)
+
+auth = auth_path.read_text()
+if "import androidx.compose.ui.text.input.KeyboardCapitalization\n" not in auth:
+    auth = quality_replace(
+        auth,
+        "import androidx.compose.ui.text.input.KeyboardType\n",
+        "import androidx.compose.ui.text.input.KeyboardType\nimport androidx.compose.ui.text.input.KeyboardCapitalization\n",
+        "Auth keyboard capitalization import"
+    )
+auth = quality_replace(
+    auth,
+    "keyboardOptions = KeyboardOptions(keyboardType = keyboardType),",
+    "keyboardOptions = KeyboardOptions(keyboardType = keyboardType, capitalization = if (keyboardType == KeyboardType.Email) KeyboardCapitalization.None else KeyboardCapitalization.Sentences),",
+    "Auth keyboard options"
+)
+auth_path.write_text(auth)
+
+api = api_path.read_text()
+
+def normalize_email_in_method(source: str, start_signature: str, end_signature: str, label: str) -> str:
+    start = source.find(start_signature)
+    if start < 0:
+        raise SystemExit(f"{label}: method start not found")
+    end = source.find(end_signature, start + len(start_signature))
+    if end < 0:
+        raise SystemExit(f"{label}: method end not found")
+    method = source[start:end]
+    if "email.trim().lowercase(" in method:
+        return source
+    if "email.trim()" not in method:
+        raise SystemExit(f"{label}: email input expression not found")
+    updated = method.replace("email.trim()", "email.trim().lowercase(Locale.ROOT)", 1)
+    return source[:start] + updated + source[end:]
+
+api = normalize_email_in_method(api, "fun signUp(", "fun completeAuthCallback(", "Signup email normalization")
+api = normalize_email_in_method(api, "fun signIn(", "fun refreshSession(", "Signin email normalization")
+api = quality_replace(
+    api,
+    '&status=eq.published&order=starts_at.asc"',
+    '&status=eq.published&order=starts_at.asc&limit=50"',
+    "Bound public event feed response"
+)
+api = quality_replace(
+    api,
+    'throw ApiException("Tiqet backend is not configured. Add SUPABASE_URL and SUPABASE_ANON_KEY to the GitHub Actions repository variables.")',
+    'throw ApiException("Tiqet is temporarily unavailable. Please try again later.")',
+    "Hide build configuration details"
+)
+api_path.write_text(api)
+
+# Carry one UUID through the Android -> Edge Function -> order-hold path.
+api = api_path.read_text()
+api = quality_replace(
+    api,
+    'fun createPaymentIntent(ticketTypeId: String, quantity: Int, provider: String = "chapa", paymentMethod: String? = null): JSONObject {',
+    'fun createPaymentIntent(ticketTypeId: String, quantity: Int, provider: String = "chapa", paymentMethod: String? = null, idempotencyKey: String? = null): JSONObject {',
+    "Accept checkout idempotency key in Android API"
+)
+api = quality_replace(
+    api,
+    '.put("quantity", quantity)\n        if (!paymentMethod.isNullOrBlank()) body.put("payment_method", paymentMethod)',
+    '.put("quantity", quantity)\n            .put("idempotency_key", idempotencyKey ?: java.util.UUID.randomUUID().toString())\n        if (!paymentMethod.isNullOrBlank()) body.put("payment_method", paymentMethod)',
+    "Send stable checkout idempotency key"
+)
+api = quality_replace(
+    api,
+    '''fun createChapaCheckout(ticketTypeId: String, quantity: Int, paymentMethod: String? = null): JSONObject =
+        createPaymentIntent(ticketTypeId, quantity, provider = "chapa", paymentMethod = paymentMethod)''',
+    '''fun createChapaCheckout(
+        ticketTypeId: String,
+        quantity: Int,
+        paymentMethod: String? = null,
+        idempotencyKey: String? = null
+    ): JSONObject = createPaymentIntent(
+        ticketTypeId, quantity, provider = "chapa",
+        paymentMethod = paymentMethod, idempotencyKey = idempotencyKey
+    )''',
+    "Expose checkout method with stable attempt key"
+)
+api_path.write_text(api)
+
+main = main_path.read_text()
+main = quality_replace(
+    main,
+    '    val context = LocalContext.current\n',
+    '''    val context = LocalContext.current
+    val checkoutPreferences = remember(context) {
+        context.getSharedPreferences("tiqet_checkout_attempts", android.content.Context.MODE_PRIVATE)
+    }
+    val checkoutAttemptStorageKey = remember(event.id, selectedTicketOption?.id, ticketCount) {
+        "checkout:" + event.id + ":" + (selectedTicketOption?.id ?: event.ticketTypeId ?: "default") + ":" + ticketCount
+    }
+    var checkoutAttemptKey by remember(checkoutAttemptStorageKey) {
+        mutableStateOf(
+            checkoutPreferences.getString(checkoutAttemptStorageKey, null)
+                ?: java.util.UUID.randomUUID().toString().also { generated ->
+                    checkoutPreferences.edit().putString(checkoutAttemptStorageKey, generated).apply()
+                }
+        )
+    }
+    fun rotateCheckoutAttemptKey() {
+        val nextKey = java.util.UUID.randomUUID().toString()
+        checkoutAttemptKey = nextKey
+        checkoutPreferences.edit().putString(checkoutAttemptStorageKey, nextKey).apply()
+    }
+''',
+    "Persist checkout key by event, ticket tier and quantity"
+)
+main = quality_replace(
+    main,
+    'api.createChapaCheckout(ticketTypeId, ticketCount, selectedPaymentMethod.takeIf { it.isNotBlank() })',
+    'api.createChapaCheckout(ticketTypeId, ticketCount, selectedPaymentMethod.takeIf { it.isNotBlank() }, idempotencyKey = checkoutAttemptKey)',
+    "Reuse the same key on checkout retries while preserving selected payment method"
+)
+main = quality_replace(
+    main,
+    '''                                    val url = checkout.optString("checkout_url")
+                                    if (url.isBlank()) throw IllegalStateException("Payment provider did not return a checkout link.")
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))''',
+    '''                                    if (checkout.optBoolean("already_paid")) {
+                                        bookingError = "Payment is already confirmed. Open the Tickets tab to view your tickets."
+                                        rotateCheckoutAttemptKey()
+                                    } else {
+                                        val url = checkout.optString("checkout_url")
+                                        if (url.isBlank()) throw IllegalStateException("Payment provider did not return a checkout link.")
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                    }''',
+    "Recover gracefully if a retry finds an already paid order"
+)
+main = quality_replace(
+    main,
+    '''                            } catch (error: Exception) {
+                                bookingError = api.userFacingError(error, "Unable to start checkout.")
+                            } finally { bookingBusy = false }''',
+    '''                            } catch (error: Exception) {
+                                // An explicit provider rejection closes the original hold. A transport
+                                // timeout keeps the same key so a retry cannot reserve tickets twice.
+                                if (error is TiqetApi.ApiException && error.httpCode == 502) {
+                                    rotateCheckoutAttemptKey()
+                                }
+                                bookingError = api.userFacingError(error, "Unable to start checkout.")
+                            } finally { bookingBusy = false }''',
+    "Preserve key on ambiguous failures and rotate after confirmed provider failure"
+)
+main_path.write_text(main)
+
+organiser = organiser_path.read_text()
+for old, new in [
+    ('Text("SETTLEMENT LEDGER", color = OrgRed, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.2.sp)',
+     'Text("Settlement ledger", color = OrgRed, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)'),
+    ('Text("RECENT TRANSACTIONS", color = OrgMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)',
+     'Text("Recent transactions", color = OrgMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)'),
+    ('Text("EVENT BANNER", color = OrgInk, fontWeight = FontWeight.Bold, fontSize = 11.sp, letterSpacing = 0.8.sp)',
+     'Text("Event banner", color = OrgInk, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)'),
+    ('Text("TICKET OPTIONS", color = OrgInk, fontWeight = FontWeight.Bold, fontSize = 12.sp, letterSpacing = 0.8.sp)',
+     'Text("Ticket options", color = OrgInk, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)')
+]:
+    if old in organiser:
+        organiser = organiser.replace(old, new, 1)
+organiser = organiser.replace(
+    '        Text(label, color = OrgRed, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.3.sp)\n        Spacer(Modifier.height(7.dp))\n',
+    '        Spacer(Modifier.height(2.dp))\n',
+    1
+)
+organiser_path.write_text(organiser)
+
+final_main = main_path.read_text()
+final_api = api_path.read_text()
+final_auth = auth_path.read_text()
+final_org = organiser_path.read_text()
+for item in ('Boxing Matches', 'Search events, venues or categories', 'SpotlightBannerCard',
+             'Icons.Outlined.Explore', 'Icons.Outlined.ConfirmationNumber', 'CircularProgressIndicator'):
+    if item not in final_main:
+        raise SystemExit(f"TIQET quality assertion failed: missing {item}")
+for item in ('limit=50', 'lowercase(Locale.ROOT)', 'temporarily unavailable. Please try again later.'):
+    if item not in final_api:
+        raise SystemExit(f"TIQET API quality assertion failed: missing {item}")
+if 'KeyboardCapitalization.None' not in final_auth:
+    raise SystemExit("TIQET auth keyboard assertion failed.")
+if 'EVENT BANNER' in final_org or 'TICKET OPTIONS' in final_org:
+    raise SystemExit("TIQET organiser label cleanup did not apply.")
+print("TIQET quality pass: discovery UX, Spotlight hierarchy, icon navigation, auth input handling, bounded feed reads and safer configuration errors applied.")
+
+
+# ---------------------------------------------------------------------------
+# Complete password-recovery flow: reset email -> deep link -> choose new password.
+# ---------------------------------------------------------------------------
+reset_screen_path = root / "app/src/main/java/et/events/mobile/TiqetPasswordResetScreen.kt"
+
+api = api_path.read_text()
+reset_api_methods = r'''    fun requestPasswordReset(email: String) {
+        requireConfigured()
+        val normalized = email.trim().lowercase(Locale.ROOT)
+        require(normalized.contains("@") && normalized.length <= 254) {
+            "Enter the email address for your Tiqet account."
+        }
+        val redirect = URLEncoder.encode(AUTH_CALLBACK_URL, Charsets.UTF_8.name())
+        request(
+            "POST",
+            "/auth/v1/recover?redirect_to=$redirect",
+            JSONObject().put("email", normalized),
+            useSession = false
+        )
+    }
+
+    fun updatePassword(newPassword: String): JSONObject {
+        requireSignedIn()
+        require(newPassword.length >= 8) { "Use at least 8 characters for your new password." }
+        return request(
+            "PUT",
+            "/auth/v1/user",
+            JSONObject().put("password", newPassword),
+            useSession = true
+        )
+    }
+
+'''
+if "fun requestPasswordReset(" not in api:
+    api = quality_replace(
+        api,
+        "    fun signIn(email: String, password: String): Session {",
+        reset_api_methods + "    fun signIn(email: String, password: String): Session {",
+        "Add Supabase password recovery and update methods"
+    )
+api_path.write_text(api)
+
+auth_path = root / "app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
+auth = auth_path.read_text()
+auth = quality_replace(
+    auth,
+    '''        AuthField("Password", password, { password = it }, password = true)
+        Spacer(Modifier.height(17.dp))''',
+    '''        AuthField("Password", password, { password = it }, password = true)
+        if (!isSignUp) {
+            Button(
+                onClick = {
+                    error = ""
+                    notice = ""
+                    if (email.isBlank()) {
+                        error = "Enter your email address first."
+                    } else {
+                        busy = true
+                        scope.launch {
+                            try {
+                                withContext(Dispatchers.IO) { api.requestPasswordReset(email) }
+                                notice = "If a Tiqet account exists for this address, a password recovery link is on its way. Open it on this phone."
+                            } catch (exception: Exception) {
+                                error = exception.message ?: "Could not request a password reset."
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    }
+                },
+                enabled = !busy && email.contains("@"),
+                modifier = Modifier.align(Alignment.End).height(38.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Transparent,
+                    contentColor = AuthRed
+                )
+            ) {
+                Text("Forgot password?", fontWeight = FontWeight.SemiBold)
+            }
+        }
+        Spacer(Modifier.height(17.dp))''',
+    "Add a working forgot-password action to sign in"
+)
+auth_path.write_text(auth)
+
+# MainActivity routes Supabase recovery deep links to a dedicated set-new-password screen.
+main = main_path.read_text()
+main = quality_replace(
+    main,
+    '    private var authSession by mutableStateOf<TiqetApi.Session?>(null)\n',
+    '    private var authSession by mutableStateOf<TiqetApi.Session?>(null)\n    private var passwordRecoveryPending by mutableStateOf(false)\n',
+    "Track password recovery deep-link state"
+)
+main = quality_replace(
+    main,
+    '''                    onSessionChanged = { authSession = tiqetApi.currentSession() },
+                    onSignOut = { tiqetApi.signOut(); authSession = null }''',
+    '''                    onSessionChanged = { authSession = tiqetApi.currentSession() },
+                    passwordRecoveryPending = passwordRecoveryPending,
+                    onPasswordRecoveryCompleted = {
+                        passwordRecoveryPending = false
+                        authSession = tiqetApi.currentSession()
+                    },
+                    onSignOut = { tiqetApi.signOut(); authSession = null; passwordRecoveryPending = false }''',
+    "Wire password recovery into the app root"
+)
+main = quality_replace(
+    main,
+    '''        try {
+            authSession = tiqetApi.completeAuthCallback(callbackUri)
+            Toast.makeText(this, "Email confirmed. Your Tiqet account is ready.", Toast.LENGTH_LONG).show()''',
+    '''        try {
+            val callbackParameters = Uri.parse("https://tiqet.invalid/?" + callbackUri.fragment.orEmpty())
+            val callbackType = callbackUri.getQueryParameter("type")
+                ?: callbackParameters.getQueryParameter("type")
+            authSession = tiqetApi.completeAuthCallback(callbackUri)
+            passwordRecoveryPending = callbackType.equals("recovery", ignoreCase = true)
+            val message = if (passwordRecoveryPending) {
+                "Verify your identity and choose a new password."
+            } else {
+                "Email confirmed. Your Tiqet account is ready."
+            }
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()''',
+    "Distinguish Supabase recovery links from email confirmation links"
+)
+main = quality_replace(
+    main,
+    '''    onChooseRole: (String?) -> Unit,
+    onSessionChanged: () -> Unit,
+    onSignOut: () -> Unit
+) {
+    when {
+        role == null -> RoleChooser(onChoose = { selected -> onChooseRole(selected) })''',
+    '''    onChooseRole: (String?) -> Unit,
+    onSessionChanged: () -> Unit,
+    passwordRecoveryPending: Boolean,
+    onPasswordRecoveryCompleted: () -> Unit,
+    onSignOut: () -> Unit
+) {
+    when {
+        passwordRecoveryPending -> TiqetPasswordResetScreen(
+            api = api,
+            onCompleted = onPasswordRecoveryCompleted,
+            onCancel = onSignOut
+        )
+        role == null -> RoleChooser(onChoose = { selected -> onChooseRole(selected) })''',
+    "Show set-new-password screen when recovery callback returns"
+)
+main_path.write_text(main)
+
+reset_screen = r'''package et.events.mobile
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.systemBarsPadding
+import et.events.mobile.backend.TiqetApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private val ResetRed = Color(0xFFB82035)
+private val ResetIvory = Color(0xFFF7F1E7)
+private val ResetInk = Color(0xFF2B2020)
+private val ResetMuted = Color(0xFF8C7771)
+
+@Composable
+fun TiqetPasswordResetScreen(
+    api: TiqetApi,
+    onCompleted: () -> Unit,
+    onCancel: () -> Unit
+) {
+    var password by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ResetIvory)
+            .systemBarsPadding()
+            .imePadding()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 28.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("TIQET", color = ResetRed, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 3.sp)
+        Spacer(Modifier.height(28.dp))
+        Text("Set a new password", color = ResetInk, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(7.dp))
+        Text("Choose a password you have not used for this account.", color = ResetMuted, fontSize = 13.sp)
+        Spacer(Modifier.height(23.dp))
+        OutlinedTextField(
+            value = password,
+            onValueChange = { password = it; error = "" },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("New password") },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            visualTransformation = PasswordVisualTransformation()
+        )
+        Spacer(Modifier.height(11.dp))
+        OutlinedTextField(
+            value = confirmation,
+            onValueChange = { confirmation = it; error = "" },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Confirm new password") },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            visualTransformation = PasswordVisualTransformation()
+        )
+        if (error.isNotBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Text(error, color = ResetRed, fontSize = 12.sp)
+        }
+        Spacer(Modifier.height(20.dp))
+        Button(
+            onClick = {
+                error = when {
+                    password.length < 8 -> "Use at least 8 characters."
+                    password != confirmation -> "The passwords do not match."
+                    else -> ""
+                }
+                if (error.isBlank()) {
+                    busy = true
+                    scope.launch {
+                        try {
+                            withContext(Dispatchers.IO) { api.updatePassword(password) }
+                            onCompleted()
+                        } catch (exception: Exception) {
+                            error = exception.message ?: "Password could not be updated. Request a new recovery link."
+                        } finally {
+                            busy = false
+                        }
+                    }
+                }
+            },
+            enabled = !busy && password.isNotBlank() && confirmation.isNotBlank(),
+            modifier = Modifier.fillMaxWidth().height(51.dp),
+            shape = RoundedCornerShape(13.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = ResetRed, contentColor = ResetIvory)
+        ) {
+            Text(if (busy) "Updating password…" else "Update password", fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = onCancel,
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = ResetMuted)
+        ) {
+            Text("Back to sign in")
+        }
+    }
+}
+'''
+reset_screen_path.parent.mkdir(parents=True, exist_ok=True)
+reset_screen_path.write_text(reset_screen)
+print("Added complete Supabase password recovery and new-password flow.")
