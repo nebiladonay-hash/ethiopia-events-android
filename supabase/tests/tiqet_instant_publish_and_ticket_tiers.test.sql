@@ -352,6 +352,8 @@ update public.events
 set status='submitted'::public.event_status, approval_status='pending'
 where id=(select event_id from tiqet_test_created_event);
 
+-- Grant the test role table-level UPDATE inside this rollback-only test transaction so RLS, not missing SQL privileges, is what blocks the flagged row.
+grant update on public.events to authenticated;
 select set_config('request.jwt.claim.sub','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',true);
 set role authenticated;
 do $flagged_event_owner_update_test$
