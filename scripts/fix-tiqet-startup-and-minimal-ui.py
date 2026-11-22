@@ -758,18 +758,28 @@ main = quality_replace(
     '                onClick = {\n                    if (bookingBusy) return@RedActionButton\n                    val ticketTypeId = chosenTicketTypeId',
     "Prevent repeated checkout dispatch"
 )
-main = quality_replace(
-    main,
-    'private fun RedActionButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {',
-    'private fun RedActionButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {',
-    "Add a real enabled state to the primary action"
-)
-main = quality_replace(
-    main,
-    '            .background(BrandRed)\n            .clickable(onClick = onClick)',
-    '            .background(if (enabled) BrandRed else Muted)\n            .clickable(enabled = enabled, onClick = onClick)',
-    "Apply enabled state to the primary action surface"
-)
+red_action_button = r'''@Composable
+private fun RedActionButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(50.dp)
+            .clip(RoundedCornerShape(13.dp))
+            .background(if (enabled) BrandRed else Muted)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 17.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text, color = BrandIvory, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    }
+}
+'''
+main = replace_function_by_braces(main, "private fun RedActionButton(", red_action_button)
 main_path.write_text(main)
 
 auth = auth_path.read_text()
