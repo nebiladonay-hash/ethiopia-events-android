@@ -326,12 +326,14 @@ jobs:
 
 
       - name: Smoke-test customer app launch and authentication screens
-        timeout-minutes: 12
+        timeout-minutes: 25
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           arch: x86_64
           profile: pixel_2
+          emulator-boot-timeout: 15
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 2048
           disable-animations: true
           script: bash "$GITHUB_WORKSPACE/scripts/smoke-test-tiqet-android.sh"
 
