@@ -326,6 +326,8 @@ jobs:
 
 
       - name: Smoke-test customer app launch and authentication screens
+        env:
+          ANDROID_I_WANT_MY_TCG: 'yes'
         timeout-minutes: 25
         uses: reactivecircus/android-emulator-runner@v2
         with:
