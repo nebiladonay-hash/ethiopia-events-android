@@ -653,21 +653,67 @@ main_path.write_text(main)
 
 # Event details use the real organiser poster and clear, low-noise ticket selection.
 main = main_path.read_text()
-main = quality_replace(
-    main,
-    'TicketMark(color = BrandIvory.copy(alpha = 0.9f), modifier = Modifier.size(86.dp))',
-    '''if (!event.imageUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = event.imageUrl,
-                    contentDescription = event.title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
+detail_start = main.find("private fun EventDetailScreen(")
+detail_end = main.find("\n@Composable", detail_start + 1)
+if detail_start < 0 or detail_end < 0:
+    raise SystemExit("Could not locate the event detail screen for poster integration.")
+detail_region = main[detail_start:detail_end]
+header_start = detail_region.find("TiqetWaveHeader(")
+if header_start >= 0:
+    opening = detail_region.find("(", header_start)
+    depth = 0
+    quote = None
+    escaped = False
+    closing = -1
+    for position in range(opening, len(detail_region)):
+        ch = detail_region[position]
+        if quote:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                quote = None
+            continue
+        if ch in ('"', "'"):
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                closing = position
+                break
+    if closing < 0:
+        raise SystemExit("Could not find the end of the event-detail wave header.")
+    poster = """
+        Spacer(Modifier.height(10.dp))
+        if (!event.imageUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = event.imageUrl,
+                contentDescription = event.title,
+                modifier = Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(16.dp)),
+                contentScale = ContentScale.Crop
+            )
+        }
+"""
+    detail_region = detail_region[:closing + 1] + poster + detail_region[closing + 1:]
+elif "AsyncImage(" not in detail_region and "event.imageUrl" not in detail_region:
+    marker = "TicketMark(color = BrandIvory.copy(alpha = 0.9f), modifier = Modifier.size(86.dp))"
+    if marker not in detail_region:
+        raise SystemExit("Event detail has neither a wave header nor a recognised artwork placeholder.")
+    detail_region = detail_region.replace(
+        marker,
+        """if (!event.imageUrl.isNullOrBlank()) {
+                AsyncImage(model = event.imageUrl, contentDescription = event.title,
+                    modifier = Modifier.fillMaxWidth().height(200.dp), contentScale = ContentScale.Crop)
             } else {
                 TicketMark(color = BrandIvory.copy(alpha = 0.9f), modifier = Modifier.size(72.dp))
-            }''',
-    "Use organiser poster on event detail"
-)
+            }""",
+        1
+    )
+main = main[:detail_start] + detail_region + main[detail_end:]
+
 main = quality_replace(
     main,
     'Text(event.category.uppercase() + "  ·  " + event.tag, color = BrandRed, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)',
