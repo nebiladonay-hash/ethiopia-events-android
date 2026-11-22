@@ -482,6 +482,12 @@ main = quality_replace(
 main = quality_replace(main, "Search events or artists", "Search events, venues or categories", "Search hint")
 main = quality_replace(
     main,
+    '(search.isBlank() || event.title.contains(search, ignoreCase = true) || event.category.contains(search, ignoreCase = true))',
+    '(search.isBlank() || event.title.contains(search, ignoreCase = true) || event.category.contains(search, ignoreCase = true) || event.venue.contains(search, ignoreCase = true) || event.description.contains(search, ignoreCase = true))',
+    "Search titles, categories, venues and descriptions"
+)
+main = quality_replace(
+    main,
     'Text(if (isLoading) "UPDATING" else "ETB · LIVE LISTINGS", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)',
     'Text(if (isLoading) "Loading" else filtered.size.toString() + " events", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)',
     "Replace filler listing badge with actual count"
