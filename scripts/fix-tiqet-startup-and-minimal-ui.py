@@ -910,9 +910,11 @@ main = quality_replace(
 main = quality_replace(
     main,
     '''                            } catch (error: Exception) {
-                                bookingError = error.message ?: "Unable to start checkout."
+                                bookingError = api.userFacingError(error, "Unable to start checkout.")
                             } finally { bookingBusy = false }''',
     '''                            } catch (error: Exception) {
+                                // An explicit provider rejection closes the original hold. A transport
+                                // timeout keeps the same key so a retry cannot reserve tickets twice.
                                 if (error is TiqetApi.ApiException && error.httpCode == 502) {
                                     checkoutAttemptKey = java.util.UUID.randomUUID().toString()
                                 }
