@@ -784,6 +784,92 @@ api = quality_replace(
 )
 api_path.write_text(api)
 
+# Carry one UUID through the Android -> Edge Function -> order-hold path.
+api = api_path.read_text()
+api = quality_replace(
+    api,
+    'fun createPaymentIntent(ticketTypeId: String, quantity: Int, provider: String = "chapa", paymentMethod: String? = null): JSONObject {',
+    'fun createPaymentIntent(ticketTypeId: String, quantity: Int, provider: String = "chapa", paymentMethod: String? = null, idempotencyKey: String? = null): JSONObject {',
+    "Accept checkout idempotency key in Android API"
+)
+api = quality_replace(
+    api,
+    '.put("quantity", quantity)\n        if (!paymentMethod.isNullOrBlank()) body.put("payment_method", paymentMethod)',
+    '.put("quantity", quantity)\n            .put("idempotency_key", idempotencyKey ?: java.util.UUID.randomUUID().toString())\n        if (!paymentMethod.isNullOrBlank()) body.put("payment_method", paymentMethod)',
+    "Send stable checkout idempotency key"
+)
+api = quality_replace(
+    api,
+    'fun createChapaCheckout(ticketTypeId: String, quantity: Int): JSONObject =\n        createPaymentIntent(ticketTypeId, quantity, provider = "chapa")',
+    '''fun createChapaCheckout(ticketTypeId: String, quantity: Int): JSONObject =
+        createPaymentIntent(ticketTypeId, quantity, provider = "chapa")
+
+    fun createChapaCheckout(ticketTypeId: String, quantity: Int, idempotencyKey: String): JSONObject =
+        createPaymentIntent(ticketTypeId, quantity, provider = "chapa", idempotencyKey = idempotencyKey)''',
+    "Expose checkout method with stable attempt key"
+)
+api_path.write_text(api)
+
+main = main_path.read_text()
+main = quality_replace(
+    main,
+    '    var bookingError by remember { mutableStateOf("") }\n',
+    '    var bookingError by remember { mutableStateOf("") }\n    var checkoutAttemptKey by remember(event.id) { mutableStateOf(java.util.UUID.randomUUID().toString()) }\n',
+    "Persist one checkout attempt key for the event detail session"
+)
+main = quality_replace(
+    main,
+    'clickable { selectedTicketOption = option }',
+    'clickable { selectedTicketOption = option; checkoutAttemptKey = java.util.UUID.randomUUID().toString() }',
+    "New checkout key when ticket tier changes"
+)
+main = quality_replace(
+    main,
+    'if (ticketCount > 1) ticketCount--',
+    'if (ticketCount > 1) { ticketCount--; checkoutAttemptKey = java.util.UUID.randomUUID().toString() }',
+    "New checkout key when quantity decreases"
+)
+main = quality_replace(
+    main,
+    'if (ticketCount < 10) ticketCount++',
+    'if (ticketCount < 10) { ticketCount++; checkoutAttemptKey = java.util.UUID.randomUUID().toString() }',
+    "New checkout key when quantity increases"
+)
+main = quality_replace(
+    main,
+    'api.createChapaCheckout(ticketTypeId, ticketCount)',
+    'api.createChapaCheckout(ticketTypeId, ticketCount, checkoutAttemptKey)',
+    "Reuse the same key on checkout retries"
+)
+main = quality_replace(
+    main,
+    '''                                    val url = checkout.optString("checkout_url")
+                                    if (url.isBlank()) throw IllegalStateException("Payment provider did not return a checkout link.")
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))''',
+    '''                                    if (checkout.optBoolean("already_paid")) {
+                                        bookingError = "Payment is already confirmed. Open the Tickets tab to view your tickets."
+                                    } else {
+                                        val url = checkout.optString("checkout_url")
+                                        if (url.isBlank()) throw IllegalStateException("Payment provider did not return a checkout link.")
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                    }''',
+    "Recover gracefully if a retry finds an already paid order"
+)
+main = quality_replace(
+    main,
+    '''                            } catch (error: Exception) {
+                                bookingError = error.message ?: "Unable to start checkout."
+                            } finally { bookingBusy = false }''',
+    '''                            } catch (error: Exception) {
+                                if (error is TiqetApi.ApiException && error.httpCode == 502) {
+                                    checkoutAttemptKey = java.util.UUID.randomUUID().toString()
+                                }
+                                bookingError = api.userFacingError(error, "Unable to start checkout.")
+                            } finally { bookingBusy = false }''',
+    "Preserve key on ambiguous failures and rotate after confirmed provider failure"
+)
+main_path.write_text(main)
+
 organiser = organiser_path.read_text()
 for old, new in [
     ('Text("SETTLEMENT LEDGER", color = OrgRed, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.2.sp)',
