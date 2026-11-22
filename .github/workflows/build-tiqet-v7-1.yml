@@ -231,7 +231,7 @@ jobs:
               "auth form centered": ("verticalArrangement = Arrangement.Center" in auth),
               "no event approval copy": ("Publishing requires verification" not in auth),
               "Boxing Matches category": ("Boxing Matches" in main),
-              "Spotlight feed": ("Tiqet Spotlight" in main and "fetchSpotlightEvents" in api),
+              "Spotlight feed": ("private fun SpotlightSection" in main and "fetchSpotlightEvents" in api),
               "customer-safe error mapping": ("userFacingError" in api),
               "bounded auth retry": ("retryAuth = false" in api),
               "classic buyer entry card": ("I'm here to discover and book events." in main),
