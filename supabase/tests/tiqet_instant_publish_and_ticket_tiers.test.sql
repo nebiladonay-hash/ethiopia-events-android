@@ -225,6 +225,7 @@ end $published_checkout_no_approval_test$;
 reset role;
 
 
+
 -- A suspended organiser must not bypass event-level restrictions through direct ticket-type writes.
 -- Build a draft event as the database owner, then exercise the authenticated role and RLS policies.
 insert into public.events(
