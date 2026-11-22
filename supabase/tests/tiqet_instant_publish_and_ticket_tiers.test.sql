@@ -347,4 +347,33 @@ do $spotlight_no_approval_test$ begin
   end if;
 end $spotlight_no_approval_test$;
 
+-- A moderator can move a published event into review. The owner may not edit it back to published.
+update public.events
+set status='submitted'::public.event_status, approval_status='pending'
+where id=(select event_id from tiqet_test_created_event);
+
+select set_config('request.jwt.claim.sub','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',true);
+set role authenticated;
+do $flagged_event_owner_update_test$
+declare
+  affected integer;
+begin
+  update public.events
+  set status='published'::public.event_status, approval_status='approved'
+  where id=(select event_id from tiqet_test_created_event);
+  get diagnostics affected = row_count;
+  if affected <> 0 then
+    raise exception 'TEST_ASSERT: organiser republished an event after moderator review';
+  end if;
+
+  update public.events
+  set title=title || ' edited'
+  where id=(select event_id from tiqet_test_created_event);
+  get diagnostics affected = row_count;
+  if affected <> 0 then
+    raise exception 'TEST_ASSERT: organiser edited an event while it was under moderator review';
+  end if;
+end $flagged_event_owner_update_test$;
+reset role;
+
 rollback;
