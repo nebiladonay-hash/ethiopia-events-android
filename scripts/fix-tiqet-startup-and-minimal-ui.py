@@ -892,9 +892,13 @@ checkout_call_pattern = re.compile(
 )
 checkout_calls = list(checkout_call_pattern.finditer(main))
 if len(checkout_calls) != 1:
+    detail_start = main.find("private fun EventDetailScreen(")
+    detail_end = main.find("\\n@Composable", detail_start + 1)
+    detail = main[detail_start:detail_end] if detail_start >= 0 and detail_end >= 0 else main
+    api_lines = [line.strip() for line in detail.splitlines() if "checkout" in line.lower() or "paymentintent" in line.lower()]
     raise SystemExit(
-        "Expected exactly one checkout API call in the event detail screen; found "
-        + str(len(checkout_calls))
+        "Expected exactly one checkout API call in event detail; found " + str(len(checkout_calls))
+        + "; candidate lines: " + repr(api_lines)
     )
 checkout_call = checkout_calls[0]
 if "idempotencyKey" not in checkout_call.group(0):
