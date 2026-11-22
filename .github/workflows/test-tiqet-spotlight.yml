@@ -8,7 +8,9 @@ on:
       - 'supabase/migrations/*organizer_event_banners*'
       - 'supabase/migrations/*instant_event_publish*'
       - 'supabase/migrations/*postgrest_rpc_cache_refresh*'
+      - 'supabase/migrations/*moderation_owner_update*'
       - 'supabase/migrations/*suspended_organizer_guards*'
+      - 'supabase/migrations/*moderation_owner_update*'
       - 'supabase/tests/tiqet_spotlight_*'
       - 'supabase/tests/tiqet_instant_publish_*'
       - '.github/workflows/test-tiqet-spotlight.yml'
@@ -61,6 +63,8 @@ jobs:
         run: psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261111114500_tiqet_instant_event_publish_and_ticket_tiers.sql
       - name: Apply suspended-organiser access guards
         run: psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261122142618_tiqet_suspended_organizer_guards_and_fk_indexes.sql
+      - name: Apply flagged-event owner update lock
+        run: psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261122170000_tiqet_moderation_owner_update_lock.sql
       - name: Test Spotlight, organizer ownership and event artwork
         run: psql -v ON_ERROR_STOP=1 -f supabase/tests/tiqet_spotlight_events.test.sql
       - name: Test instant event publishing and ticket tiers
