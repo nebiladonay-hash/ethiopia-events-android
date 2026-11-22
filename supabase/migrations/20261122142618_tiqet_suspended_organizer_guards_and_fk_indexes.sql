@@ -154,29 +154,31 @@ grant execute on function public.set_organiser_event_banner(uuid,text) to authen
 -- regression harness exercise the RLS changes without pretending it contains payment schemas.
 do $indexes$
 begin
-  if to_regclass('public.chapa_refund_operations') is not null then
+  if exists (select 1 from information_schema.columns where table_schema='public' and table_name='chapa_refund_operations' and column_name='order_id') then
     execute 'create index if not exists chapa_refund_operations_order_id_idx on public.chapa_refund_operations(order_id)';
   end if;
-  if to_regclass('public.events') is not null then
+  if exists (select 1 from information_schema.columns where table_schema='public' and table_name='events' and column_name='reviewed_by') then
     execute 'create index if not exists events_reviewed_by_idx on public.events(reviewed_by)';
   end if;
-  if to_regclass('public.organisations') is not null then
+  if exists (select 1 from information_schema.columns where table_schema='public' and table_name='organisations' and column_name='reviewed_by') then
     execute 'create index if not exists organisations_reviewed_by_idx on public.organisations(reviewed_by)';
   end if;
-  if to_regclass('public.tiqet_admin_audit_log') is not null then
+  if exists (select 1 from information_schema.columns where table_schema='public' and table_name='tiqet_admin_audit_log' and column_name='actor_user_id') then
     execute 'create index if not exists tiqet_admin_audit_log_actor_user_id_idx on public.tiqet_admin_audit_log(actor_user_id)';
   end if;
-  if to_regclass('public.tiqet_event_review_flags') is not null then
+  if exists (select 1 from information_schema.columns where table_schema='public' and table_name='tiqet_event_review_flags' and column_name='flagged_by') then
     execute 'create index if not exists tiqet_event_review_flags_flagged_by_idx on public.tiqet_event_review_flags(flagged_by)';
+  end if;
+  if exists (select 1 from information_schema.columns where table_schema='public' and table_name='tiqet_event_review_flags' and column_name='resolved_by') then
     execute 'create index if not exists tiqet_event_review_flags_resolved_by_idx on public.tiqet_event_review_flags(resolved_by)';
   end if;
-  if to_regclass('public.tiqet_event_spotlight') is not null then
+  if exists (select 1 from information_schema.columns where table_schema='public' and table_name='tiqet_event_spotlight' and column_name='created_by') then
     execute 'create index if not exists tiqet_event_spotlight_created_by_idx on public.tiqet_event_spotlight(created_by)';
   end if;
-  if to_regclass('public.tiqet_staff_roles') is not null then
+  if exists (select 1 from information_schema.columns where table_schema='public' and table_name='tiqet_staff_roles' and column_name='granted_by') then
     execute 'create index if not exists tiqet_staff_roles_granted_by_idx on public.tiqet_staff_roles(granted_by)';
   end if;
-  if to_regclass('public.tiqet_trusted_organisers') is not null then
+  if exists (select 1 from information_schema.columns where table_schema='public' and table_name='tiqet_trusted_organisers' and column_name='granted_by') then
     execute 'create index if not exists tiqet_trusted_organisers_granted_by_idx on public.tiqet_trusted_organisers(granted_by)';
   end if;
 end;
