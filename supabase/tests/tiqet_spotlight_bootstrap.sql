@@ -104,3 +104,124 @@ $function$;
 grant usage on schema public to anon, authenticated, service_role;
 grant execute on function public.is_tiqet_admin() to authenticated, service_role;
 grant execute on function public.is_tiqet_moderator() to authenticated, service_role;
+
+
+-- Minimal RPC fixtures so the launch-mode migration can be exercised in this focused
+-- schema test without importing payment/settlement production tables.
+create or replace function public.create_order_hold(
+  p_ticket_type_id uuid, p_quantity integer, p_idempotency_key uuid
+) returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare v_event public.events%rowtype;
+begin
+  select e.* into v_event
+  from public.events e
+  join public.ticket_types t on t.event_id=e.id
+  where t.id=p_ticket_type_id;
+  if not found then raise exception 'Ticket type not found'; end if;
+  if v_event.status <> 'published'::public.event_status
+     or v_event.approval_status <> 'approved' then
+    raise exception 'Event is not available for sale';
+  end if;
+  return jsonb_build_object('order_status','payment_pending','quantity',p_quantity);
+end;
+$function$;
+
+create or replace function public.claim_free_tickets(
+  p_ticket_type_id uuid, p_quantity integer
+) returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare v_event public.events%rowtype;
+begin
+  select e.* into v_event
+  from public.events e
+  join public.ticket_types t on t.event_id=e.id
+  where t.id=p_ticket_type_id;
+  if not found then raise exception 'Ticket type not found'; end if;
+  if v_event.status <> 'published' or v_event.approval_status <> 'approved' then
+    raise exception 'Event is not available';
+  end if;
+  return jsonb_build_object('ok',true,'tickets_issued',p_quantity);
+end;
+$function$;
+
+create or replace function public.flag_tiqet_event_for_review(
+  p_event_id uuid, p_reason text
+) returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare v_event public.events%rowtype;
+begin
+  if auth.uid() is null or not public.is_tiqet_moderator() then
+    raise exception 'Tiqet moderator permission required';
+  end if;
+  select e.* into v_event from public.events e where e.id=p_event_id for update;
+  if not found then raise exception 'Event not found'; end if;
+  if v_event.status <> 'published'::public.event_status
+     or v_event.approval_status <> 'approved' then
+    raise exception 'Only published events can be flagged for review';
+  end if;
+  update public.events
+  set status='submitted'::public.event_status, approval_status='pending'
+  where id=p_event_id;
+  return jsonb_build_object('event_id',p_event_id,'status','submitted','flagged',true);
+end;
+$function$;
+
+create or replace function public.get_tiqet_control_overview()
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+begin
+  if auth.uid() is null or not public.is_tiqet_moderator() then
+    raise exception 'Tiqet staff permission required';
+  end if;
+  return jsonb_build_object(
+    'pending_events',(select count(*) from public.events where status='submitted'::public.event_status and approval_status='pending'),
+    'published_events',(select count(*) from public.events where status='published'::public.event_status and approval_status='approved')
+  );
+end;
+$function$;
+
+create or replace function public.submit_event_for_review(p_event_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare v_event public.events%rowtype;
+begin
+  select e.* into v_event
+  from public.events e
+  join public.organisations o on o.id=e.organisation_id
+  where e.id=p_event_id
+    and e.created_by=auth.uid()
+    and o.owner_id=auth.uid()
+    and o.status <> 'suspended'::public.organisation_status
+  for update of e;
+  if not found then raise exception 'Your event could not be found'; end if;
+  if v_event.status not in ('draft'::public.event_status, 'submitted'::public.event_status) then
+    raise exception 'This event is already published or cannot be published';
+  end if;
+  update public.events
+  set status='published'::public.event_status, approval_status='approved'
+  where id=p_event_id;
+  return jsonb_build_object('event_id',p_event_id,'status','published');
+end;
+$function$;
+
+grant execute on function public.create_order_hold(uuid,integer,uuid) to authenticated;
+grant execute on function public.claim_free_tickets(uuid,integer) to authenticated;
+grant execute on function public.flag_tiqet_event_for_review(uuid,text) to authenticated;
+grant execute on function public.get_tiqet_control_overview() to authenticated;
+grant execute on function public.submit_event_for_review(uuid) to authenticated;
