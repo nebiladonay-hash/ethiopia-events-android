@@ -189,6 +189,76 @@ begin
 end $public_listing_test$;
 reset role;
 
+
+-- A suspended organiser must not bypass event-level restrictions through direct ticket-type writes.
+-- Build a draft event as the database owner, then exercise the authenticated role and RLS policies.
+insert into public.events(
+ id,organisation_id,created_by,title,description,category,starts_at,ends_at,timezone,
+ venue_name,address,city,status,approval_status
+) values (
+ '30000000-0000-4000-8000-000000000004',
+ '20000000-0000-4000-8000-000000000004',
+ 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+ 'Suspended draft record','RLS regression fixture','Music',
+ now()+interval '28 days',null,'Africa/Addis_Ababa',
+ 'Test venue','Test road','Addis Ababa','draft','pending'
+);
+insert into public.ticket_types(id,event_id,name,price_etb)
+values (
+ '40000000-0000-4000-8000-000000000004',
+ '30000000-0000-4000-8000-000000000004',
+ 'Regular',0
+);
+
+select set_config('request.jwt.claim.sub','dddddddd-dddd-4ddd-8ddd-dddddddddddd',true);
+set role authenticated;
+
+do $suspended_ticket_insert_test$ begin
+  begin
+    insert into public.ticket_types(id,event_id,name,price_etb)
+    values (
+      '40000000-0000-4000-8000-000000000005',
+      '30000000-0000-4000-8000-000000000004',
+      'VIP',500
+    );
+    raise exception 'TEST_ASSERT: suspended organiser inserted a ticket type directly';
+  exception when insufficient_privilege then
+    null;
+  end;
+end $suspended_ticket_insert_test$;
+
+do $suspended_ticket_mutation_test$
+declare affected integer;
+begin
+  update public.ticket_types set price_etb=1
+  where id='40000000-0000-4000-8000-000000000004';
+  get diagnostics affected = row_count;
+  if affected <> 0 then
+    raise exception 'TEST_ASSERT: suspended organiser updated ticket pricing directly';
+  end if;
+
+  delete from public.ticket_types
+  where id='40000000-0000-4000-8000-000000000004';
+  get diagnostics affected = row_count;
+  if affected <> 0 then
+    raise exception 'TEST_ASSERT: suspended organiser deleted ticket inventory directly';
+  end if;
+end $suspended_ticket_mutation_test$;
+
+do $suspended_banner_upload_test$ begin
+  begin
+    insert into storage.objects(bucket_id,name,owner_id) values(
+      'tiqet-event-banners',
+      '20000000-0000-4000-8000-000000000004/30000000-0000-4000-8000-000000000004/suspended.jpg',
+      'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+    );
+    raise exception 'TEST_ASSERT: suspended organiser uploaded event artwork';
+  exception when insufficient_privilege then
+    null;
+  end;
+end $suspended_banner_upload_test$;
+reset role;
+
 -- Pending organiser profiles can upload their own banner; the image is normalized on device
 -- before it reaches this bucket, while Storage ownership remains enforced by RLS.
 select set_config('request.jwt.claim.sub','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',true);
