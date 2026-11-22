@@ -89,6 +89,7 @@ alter table public.ticket_types enable row level security;
 
 grant select on public.events, public.organisations, public.ticket_types to authenticated;
 grant select on public.events, public.ticket_types to anon;
+grant insert, update, delete on public.ticket_types to authenticated;
 
 create policy organisations_read_owner
 on public.organisations for select to authenticated
