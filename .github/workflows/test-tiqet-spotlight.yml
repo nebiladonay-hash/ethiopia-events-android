@@ -9,6 +9,9 @@ on:
       - 'supabase/migrations/*instant_event_publish*'
       - 'supabase/migrations/*postgrest_rpc_cache_refresh*'
       - 'supabase/migrations/*moderation_owner_update*'
+      - 'supabase/migrations/*remove_legacy_event_approval*'
+      - 'supabase/migrations/*moderation_owner_update*'
+      - 'supabase/migrations/*remove_legacy_event_approval*'
       - 'supabase/migrations/*suspended_organizer_guards*'
       - 'supabase/migrations/*moderation_owner_update*'
       - 'supabase/tests/tiqet_spotlight_*'
@@ -65,6 +68,8 @@ jobs:
         run: psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261122142618_tiqet_suspended_organizer_guards_and_fk_indexes.sql
       - name: Apply flagged-event owner update lock
         run: psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261122170000_tiqet_moderation_owner_update_lock.sql
+      - name: Remove obsolete event approval gates from discovery and checkout
+        run: psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261122183000_tiqet_remove_legacy_event_approval_gates.sql
       - name: Test Spotlight, organizer ownership and event artwork
         run: psql -v ON_ERROR_STOP=1 -f supabase/tests/tiqet_spotlight_events.test.sql
       - name: Test instant event publishing and ticket tiers
