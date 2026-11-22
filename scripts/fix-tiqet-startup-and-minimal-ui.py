@@ -688,8 +688,8 @@ api = normalize_email_in_method(api, "fun signUp(", "fun completeAuthCallback(",
 api = normalize_email_in_method(api, "fun signIn(", "fun refreshSession(", "Signin email normalization")
 api = quality_replace(
     api,
-    '&status=eq.published&approval_status=eq.approved&order=starts_at.asc"',
-    '&status=eq.published&approval_status=eq.approved&order=starts_at.asc&limit=50"',
+    '&status=eq.published&order=starts_at.asc"',
+    '&status=eq.published&order=starts_at.asc&limit=50"',
     "Bound public event feed response"
 )
 api = quality_replace(
