@@ -203,11 +203,11 @@ insert into public.events(
  now()+interval '28 days',null,'Africa/Addis_Ababa',
  'Test venue','Test road','Addis Ababa','draft','pending'
 );
-insert into public.ticket_types(id,event_id,name,price_etb)
+insert into public.ticket_types(id,event_id,name,price_etb,quantity_total)
 values (
  '40000000-0000-4000-8000-000000000004',
  '30000000-0000-4000-8000-000000000004',
- 'Regular',0
+ 'Regular',0,10
 );
 
 select set_config('request.jwt.claim.sub','dddddddd-dddd-4ddd-8ddd-dddddddddddd',true);
@@ -215,11 +215,11 @@ set role authenticated;
 
 do $suspended_ticket_insert_test$ begin
   begin
-    insert into public.ticket_types(id,event_id,name,price_etb)
+    insert into public.ticket_types(id,event_id,name,price_etb,quantity_total)
     values (
       '40000000-0000-4000-8000-000000000005',
       '30000000-0000-4000-8000-000000000004',
-      'VIP',500
+      'VIP',500,10
     );
     raise exception 'TEST_ASSERT: suspended organiser inserted a ticket type directly';
   exception when insufficient_privilege then
