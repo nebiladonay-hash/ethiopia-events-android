@@ -887,29 +887,12 @@ main = quality_replace(
     'if (ticketCount < 10) { ticketCount++; checkoutAttemptKey = java.util.UUID.randomUUID().toString() }',
     "New checkout key when quantity increases"
 )
-checkout_call_pattern = re.compile(
-    r'api\.(createChapaCheckout|createPaymentIntent)\((?P<args>[^()\n]*)\)'
+main = quality_replace(
+    main,
+    'api.createChapaCheckout(ticketTypeId, ticketCount, selectedPaymentMethod.takeIf { it.isNotBlank() })',
+    'api.createChapaCheckout(ticketTypeId, ticketCount, selectedPaymentMethod.takeIf { it.isNotBlank() }, idempotencyKey = checkoutAttemptKey)',
+    "Reuse the same key on checkout retries while preserving selected payment method"
 )
-checkout_calls = list(checkout_call_pattern.finditer(main))
-if len(checkout_calls) != 1:
-    detail_start = main.find("private fun EventDetailScreen(")
-    detail_end = main.find("\\n@Composable", detail_start + 1)
-    detail = main[detail_start:detail_end] if detail_start >= 0 and detail_end >= 0 else main
-    api_lines = [line.strip() for line in detail.splitlines() if "checkout" in line.lower() or "paymentintent" in line.lower()]
-    raise SystemExit(
-        "Expected exactly one checkout API call in event detail; found " + str(len(checkout_calls))
-        + "; candidate lines: " + repr(api_lines)
-    )
-checkout_call = checkout_calls[0]
-if "idempotencyKey" not in checkout_call.group(0):
-    args = checkout_call.group("args").rstrip()
-    separator = "" if not args else ", "
-    replacement_call = (
-        "api." + checkout_call.group(1) + "(" + args
-        + separator + "idempotencyKey = checkoutAttemptKey)"
-    )
-    main = main[:checkout_call.start()] + replacement_call + main[checkout_call.end():]
-
 main = quality_replace(
     main,
     '''                                    val url = checkout.optString("checkout_url")
