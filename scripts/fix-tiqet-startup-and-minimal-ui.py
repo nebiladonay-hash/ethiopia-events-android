@@ -969,3 +969,291 @@ if 'KeyboardCapitalization.None' not in final_auth:
 if 'EVENT BANNER' in final_org or 'TICKET OPTIONS' in final_org:
     raise SystemExit("TIQET organiser label cleanup did not apply.")
 print("TIQET quality pass: discovery UX, Spotlight hierarchy, icon navigation, auth input handling, bounded feed reads and safer configuration errors applied.")
+
+
+# ---------------------------------------------------------------------------
+# Complete password-recovery flow: reset email -> deep link -> choose new password.
+# ---------------------------------------------------------------------------
+reset_screen_path = root / "app/src/main/java/et/events/mobile/TiqetPasswordResetScreen.kt"
+
+api = api_path.read_text()
+reset_api_methods = r'''    fun requestPasswordReset(email: String) {
+        requireConfigured()
+        val normalized = email.trim().lowercase(Locale.ROOT)
+        require(normalized.contains("@") && normalized.length <= 254) {
+            "Enter the email address for your Tiqet account."
+        }
+        val redirect = URLEncoder.encode(AUTH_CALLBACK_URL, Charsets.UTF_8.name())
+        request(
+            "POST",
+            "/auth/v1/recover?redirect_to=$redirect",
+            JSONObject().put("email", normalized),
+            useSession = false
+        )
+    }
+
+    fun updatePassword(newPassword: String): JSONObject {
+        requireSignedIn()
+        require(newPassword.length >= 8) { "Use at least 8 characters for your new password." }
+        return request(
+            "PUT",
+            "/auth/v1/user",
+            JSONObject().put("password", newPassword),
+            useSession = true
+        )
+    }
+
+'''
+if "fun requestPasswordReset(" not in api:
+    api = quality_replace(
+        api,
+        "    fun signIn(email: String, password: String): Session {",
+        reset_api_methods + "    fun signIn(email: String, password: String): Session {",
+        "Add Supabase password recovery and update methods"
+    )
+api_path.write_text(api)
+
+auth_path = root / "app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
+auth = auth_path.read_text()
+auth = quality_replace(
+    auth,
+    '''        AuthField("Password", password, { password = it }, password = true)
+        Spacer(Modifier.height(17.dp))''',
+    '''        AuthField("Password", password, { password = it }, password = true)
+        if (!isSignUp) {
+            Button(
+                onClick = {
+                    error = ""
+                    notice = ""
+                    if (email.isBlank()) {
+                        error = "Enter your email address first."
+                    } else {
+                        busy = true
+                        scope.launch {
+                            try {
+                                withContext(Dispatchers.IO) { api.requestPasswordReset(email) }
+                                notice = "If a Tiqet account exists for this address, a password recovery link is on its way. Open it on this phone."
+                            } catch (exception: Exception) {
+                                error = exception.message ?: "Could not request a password reset."
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    }
+                },
+                enabled = !busy && email.contains("@"),
+                modifier = Modifier.align(Alignment.End).height(38.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Transparent,
+                    contentColor = AuthRed
+                )
+            ) {
+                Text("Forgot password?", fontWeight = FontWeight.SemiBold)
+            }
+        }
+        Spacer(Modifier.height(17.dp))''',
+    "Add a working forgot-password action to sign in"
+)
+auth_path.write_text(auth)
+
+# MainActivity routes Supabase recovery deep links to a dedicated set-new-password screen.
+main = main_path.read_text()
+main = quality_replace(
+    main,
+    '    private var authSession by mutableStateOf<TiqetApi.Session?>(null)\n',
+    '    private var authSession by mutableStateOf<TiqetApi.Session?>(null)\n    private var passwordRecoveryPending by mutableStateOf(false)\n',
+    "Track password recovery deep-link state"
+)
+main = quality_replace(
+    main,
+    '''                    onSessionChanged = { authSession = tiqetApi.currentSession() },
+                    onSignOut = { tiqetApi.signOut(); authSession = null }''',
+    '''                    onSessionChanged = { authSession = tiqetApi.currentSession() },
+                    passwordRecoveryPending = passwordRecoveryPending,
+                    onPasswordRecoveryCompleted = {
+                        passwordRecoveryPending = false
+                        authSession = tiqetApi.currentSession()
+                    },
+                    onSignOut = { tiqetApi.signOut(); authSession = null; passwordRecoveryPending = false }''',
+    "Wire password recovery into the app root"
+)
+main = quality_replace(
+    main,
+    '''        try {
+            authSession = tiqetApi.completeAuthCallback(callbackUri)
+            Toast.makeText(this, "Email confirmed. Your Tiqet account is ready.", Toast.LENGTH_LONG).show()''',
+    '''        try {
+            val callbackParameters = Uri.parse("https://tiqet.invalid/?" + callbackUri.fragment.orEmpty())
+            val callbackType = callbackUri.getQueryParameter("type")
+                ?: callbackParameters.getQueryParameter("type")
+            authSession = tiqetApi.completeAuthCallback(callbackUri)
+            passwordRecoveryPending = callbackType.equals("recovery", ignoreCase = true)
+            val message = if (passwordRecoveryPending) {
+                "Verify your identity and choose a new password."
+            } else {
+                "Email confirmed. Your Tiqet account is ready."
+            }
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()''',
+    "Distinguish Supabase recovery links from email confirmation links"
+)
+main = quality_replace(
+    main,
+    '''    onChooseRole: (String?) -> Unit,
+    onSessionChanged: () -> Unit,
+    onSignOut: () -> Unit
+) {
+    when {
+        role == null -> RoleChooser(onChoose = { selected -> onChooseRole(selected) })''',
+    '''    onChooseRole: (String?) -> Unit,
+    onSessionChanged: () -> Unit,
+    passwordRecoveryPending: Boolean,
+    onPasswordRecoveryCompleted: () -> Unit,
+    onSignOut: () -> Unit
+) {
+    when {
+        passwordRecoveryPending -> TiqetPasswordResetScreen(
+            api = api,
+            onCompleted = onPasswordRecoveryCompleted,
+            onCancel = onSignOut
+        )
+        role == null -> RoleChooser(onChoose = { selected -> onChooseRole(selected) })''',
+    "Show set-new-password screen when recovery callback returns"
+)
+main_path.write_text(main)
+
+reset_screen = r'''package et.events.mobile
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.systemBarsPadding
+import et.events.mobile.backend.TiqetApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private val ResetRed = Color(0xFFB82035)
+private val ResetIvory = Color(0xFFF7F1E7)
+private val ResetInk = Color(0xFF2B2020)
+private val ResetMuted = Color(0xFF8C7771)
+
+@Composable
+fun TiqetPasswordResetScreen(
+    api: TiqetApi,
+    onCompleted: () -> Unit,
+    onCancel: () -> Unit
+) {
+    var password by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ResetIvory)
+            .systemBarsPadding()
+            .imePadding()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 28.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("TIQET", color = ResetRed, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 3.sp)
+        Spacer(Modifier.height(28.dp))
+        Text("Set a new password", color = ResetInk, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(7.dp))
+        Text("Choose a password you have not used for this account.", color = ResetMuted, fontSize = 13.sp)
+        Spacer(Modifier.height(23.dp))
+        OutlinedTextField(
+            value = password,
+            onValueChange = { password = it; error = "" },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("New password") },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            visualTransformation = PasswordVisualTransformation()
+        )
+        Spacer(Modifier.height(11.dp))
+        OutlinedTextField(
+            value = confirmation,
+            onValueChange = { confirmation = it; error = "" },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Confirm new password") },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            visualTransformation = PasswordVisualTransformation()
+        )
+        if (error.isNotBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Text(error, color = ResetRed, fontSize = 12.sp)
+        }
+        Spacer(Modifier.height(20.dp))
+        Button(
+            onClick = {
+                error = when {
+                    password.length < 8 -> "Use at least 8 characters."
+                    password != confirmation -> "The passwords do not match."
+                    else -> ""
+                }
+                if (error.isBlank()) {
+                    busy = true
+                    scope.launch {
+                        try {
+                            withContext(Dispatchers.IO) { api.updatePassword(password) }
+                            onCompleted()
+                        } catch (exception: Exception) {
+                            error = exception.message ?: "Password could not be updated. Request a new recovery link."
+                        } finally {
+                            busy = false
+                        }
+                    }
+                }
+            },
+            enabled = !busy && password.isNotBlank() && confirmation.isNotBlank(),
+            modifier = Modifier.fillMaxWidth().height(51.dp),
+            shape = RoundedCornerShape(13.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = ResetRed, contentColor = ResetIvory)
+        ) {
+            Text(if (busy) "Updating password…" else "Update password", fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = onCancel,
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = ResetMuted)
+        ) {
+            Text("Back to sign in")
+        }
+    }
+}
+'''
+reset_screen_path.write_text_text = None
+reset_screen_path.parent.mkdir(parents=True, exist_ok=True)
+reset_screen_path.write_text(reset_screen)
+print("Added complete Supabase password recovery and new-password flow.")
