@@ -653,25 +653,10 @@ main_path.write_text(main)
 
 # Event details use the real organiser poster and clear, low-noise ticket selection.
 main = main_path.read_text()
-old_hero = """        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(200.dp)
-                .clip(RoundedCornerShape(22.dp))
-                .background(BrandRed),
-            contentAlignment = Alignment.Center
-        ) {
-            TicketMark(color = BrandIvory.copy(alpha = 0.9f), modifier = Modifier.size(86.dp))
-        }"""
-new_hero = """        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(200.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(BrandRed),
-            contentAlignment = Alignment.Center
-        ) {
-            if (!event.imageUrl.isNullOrBlank()) {
+main = quality_replace(
+    main,
+    'TicketMark(color = BrandIvory.copy(alpha = 0.9f), modifier = Modifier.size(86.dp))',
+    '''if (!event.imageUrl.isNullOrBlank()) {
                 AsyncImage(
                     model = event.imageUrl,
                     contentDescription = event.title,
@@ -680,9 +665,9 @@ new_hero = """        Box(
                 )
             } else {
                 TicketMark(color = BrandIvory.copy(alpha = 0.9f), modifier = Modifier.size(72.dp))
-            }
-        }"""
-main = quality_replace(main, old_hero, new_hero, "Use organiser poster on event detail")
+            }''',
+    "Use organiser poster on event detail"
+)
 main = quality_replace(
     main,
     'Text(event.category.uppercase() + "  ·  " + event.tag, color = BrandRed, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)',
