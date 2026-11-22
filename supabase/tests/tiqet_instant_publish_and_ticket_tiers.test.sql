@@ -189,6 +189,41 @@ begin
 end $public_listing_test$;
 reset role;
 
+-- Ticket availability and checkout follow published event status, not the retired approval flag.
+update public.events
+set approval_status='pending'
+where id=(select event_id from tiqet_test_free_event);
+
+select set_config('request.jwt.claim.sub','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',true);
+set role authenticated;
+do $published_checkout_no_approval_test$
+declare
+  paid_result jsonb;
+  free_result jsonb;
+begin
+  paid_result := public.create_order_hold(
+    (select id from public.ticket_types
+      where event_id=(select event_id from tiqet_test_created_event)
+        and name='Regular'),
+    1,
+    'bbbbbbbb-0000-4000-8000-000000000001'::uuid
+  );
+  if paid_result->>'order_status' <> 'payment_pending' then
+    raise exception 'TEST_ASSERT: paid checkout still depends on legacy approval_status';
+  end if;
+
+  free_result := public.claim_free_tickets(
+    (select id from public.ticket_types
+      where event_id=(select event_id from tiqet_test_free_event)
+        and name='Regular'),
+    1
+  );
+  if coalesce((free_result->>'ok')::boolean,false) is not true then
+    raise exception 'TEST_ASSERT: free ticket claims still depend on legacy approval_status';
+  end if;
+end $published_checkout_no_approval_test$;
+reset role;
+
 
 -- A suspended organiser must not bypass event-level restrictions through direct ticket-type writes.
 -- Build a draft event as the database owner, then exercise the authenticated role and RLS policies.
@@ -347,10 +382,18 @@ do $spotlight_no_approval_test$ begin
   end if;
 end $spotlight_no_approval_test$;
 
--- A moderator can move a published event into review. The owner may not edit it back to published.
+-- A moderator may flag any published event, regardless of the obsolete approval flag.
+-- The review RPC transitions it to submitted/pending; the organiser must not reverse that action.
 update public.events
-set status='submitted'::public.event_status, approval_status='pending'
+set approval_status='pending'
 where id=(select event_id from tiqet_test_created_event);
+select set_config('request.jwt.claim.sub','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',true);
+set role authenticated;
+select public.flag_tiqet_event_for_review(
+  (select event_id from tiqet_test_created_event),
+  'Regression test for owner republish bypass'
+);
+reset role;
 
 -- Grant the test role table-level UPDATE inside this rollback-only test transaction so RLS, not missing SQL privileges, is what blocks the flagged row.
 grant update on public.events to authenticated;
@@ -375,6 +418,13 @@ begin
   if affected <> 0 then
     raise exception 'TEST_ASSERT: organiser edited an event while it was under moderator review';
   end if;
+
+  begin
+    perform public.submit_event_for_review((select event_id from tiqet_test_created_event));
+    raise exception 'TEST_ASSERT: legacy publish RPC republished an event under moderator review';
+  exception when others then
+    if sqlerrm not like '%already published or cannot be published%' then raise; end if;
+  end;
 end $flagged_event_owner_update_test$;
 reset role;
 
