@@ -677,11 +677,11 @@ def normalize_email_in_method(source: str, start_signature: str, end_signature: 
     if end < 0:
         raise SystemExit(f"{label}: method end not found")
     method = source[start:end]
-    if re.search(r'email\.trim\(\)\.lowercase\(', method):
+    if "email.trim().lowercase(" in method:
         return source
-    updated, count = re.subn(r'email\.trim\(\)', 'email.trim().lowercase(Locale.ROOT)', method, count=1)
-    if count != 1:
-        raise SystemExit(f"{label}: could not normalize email input safely")
+    if "email.trim()" not in method:
+        raise SystemExit(f"{label}: email input expression not found")
+    updated = method.replace("email.trim()", "email.trim().lowercase(Locale.ROOT)", 1)
     return source[:start] + updated + source[end:]
 
 api = normalize_email_in_method(api, "fun signUp(", "fun completeAuthCallback(", "Signup email normalization")
