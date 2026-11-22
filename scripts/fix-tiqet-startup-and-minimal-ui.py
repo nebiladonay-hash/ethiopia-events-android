@@ -560,8 +560,8 @@ private fun SpotlightSection(events: List<EventCardModel>, onOpenEvent: (EventCa
         }
     }
 }
-
-@Composable
+'''
+spotlight_card = r'''@Composable
 private fun SpotlightBannerCard(event: EventCardModel, onClick: () -> Unit) {
     Box(
         modifier = Modifier
@@ -605,21 +605,7 @@ private fun SpotlightBannerCard(event: EventCardModel, onClick: () -> Unit) {
 }
 '''
 main = replace_function_by_braces(main, "private fun SpotlightSection(", spotlight_section)
-
-icon_imports = [
-    "import androidx.compose.material3.Icon\n",
-    "import androidx.compose.material.icons.Icons\n",
-    "import androidx.compose.material.icons.outlined.Explore\n",
-    "import androidx.compose.material.icons.outlined.ConfirmationNumber\n",
-    "import androidx.compose.material.icons.outlined.BookmarkBorder\n",
-    "import androidx.compose.material.icons.outlined.PersonOutline\n",
-]
-for line in icon_imports:
-    if line not in main:
-        anchor = "import androidx.compose.material3.Text\n"
-        if anchor not in main:
-            raise SystemExit("Material imports anchor missing for bottom navigation.")
-        main = main.replace(anchor, anchor + line, 1)
+main = replace_function_by_braces(main, "private fun SpotlightBannerCard(", spotlight_card)
 
 bottom_bar = r'''@Composable
 private fun BottomBar(items: List<String>, selected: String, onSelect: (String) -> Unit) {
@@ -682,8 +668,24 @@ auth = quality_replace(
 auth_path.write_text(auth)
 
 api = api_path.read_text()
-api = quality_replace(api, 'JSONObject().put("email", email.trim())', 'JSONObject().put("email", email.trim().lowercase(Locale.ROOT))', "Signup email normalization")
-api = quality_replace(api, 'JSONObject().put("email", email.trim()).put("password", password)', 'JSONObject().put("email", email.trim().lowercase(Locale.ROOT)).put("password", password)', "Signin email normalization")
+
+def normalize_email_in_method(source: str, start_signature: str, end_signature: str, label: str) -> str:
+    start = source.find(start_signature)
+    if start < 0:
+        raise SystemExit(f"{label}: method start not found")
+    end = source.find(end_signature, start + len(start_signature))
+    if end < 0:
+        raise SystemExit(f"{label}: method end not found")
+    method = source[start:end]
+    if re.search(r'email\\.trim\\(\\)\\.lowercase\\(', method):
+        return source
+    updated, count = re.subn(r'email\\.trim\\(\\)', 'email.trim().lowercase(Locale.ROOT)', method, count=1)
+    if count != 1:
+        raise SystemExit(f"{label}: could not normalize email input safely")
+    return source[:start] + updated + source[end:]
+
+api = normalize_email_in_method(api, "fun signUp(", "fun completeAuthCallback(", "Signup email normalization")
+api = normalize_email_in_method(api, "fun signIn(", "fun refreshSession(", "Signin email normalization")
 api = quality_replace(
     api,
     '&status=eq.published&approval_status=eq.approved&order=starts_at.asc"',
