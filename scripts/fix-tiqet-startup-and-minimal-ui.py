@@ -714,18 +714,24 @@ elif "AsyncImage(" not in detail_region and "event.imageUrl" not in detail_regio
     )
 main = main[:detail_start] + detail_region + main[detail_end:]
 
-main = quality_replace(
-    main,
-    'Text(event.category.uppercase() + "  ·  " + event.tag, color = BrandRed, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)',
-    'Text(event.category, color = BrandRed, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)',
-    "Remove category and LIVE status filler"
-)
-main = quality_replace(
-    main,
-    'Text("EVENT DETAILS", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)',
-    'Text("Event details", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)',
-    "Title case event detail heading"
-)
+# The final wave patch already changes the detail header in some source revisions.
+# Apply the label cleanup only when the older text is still present.
+legacy_category = 'Text(event.category.uppercase() + "  ·  " + event.tag, color = BrandRed, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)'
+if legacy_category in main:
+    main = main.replace(
+        legacy_category,
+        'Text(event.category, color = BrandRed, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)',
+        1
+    )
+
+legacy_detail_heading = 'Text("EVENT DETAILS", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)'
+if legacy_detail_heading in main:
+    main = main.replace(
+        legacy_detail_heading,
+        'Text("Event details", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)',
+        1
+    )
+
 main = quality_replace(
     main,
     '                    Text(if (selected) "SELECTED" else "CHOOSE", color = if (selected) BrandRed else Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)',
