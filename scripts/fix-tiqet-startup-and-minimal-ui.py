@@ -457,3 +457,280 @@ print("Classic Tiqet red/ivory ticket-card UI and clean wave header restored; du
 
 
 # Rebuild trigger: publish APK before emulator check.
+
+
+# ---------------------------------------------------------------------------
+# TIQET quality pass: production-minded UI details after all legacy patches.
+# This executes last in the build pipeline so the design system is consistent.
+# ---------------------------------------------------------------------------
+auth_path = root / "app/src/main/java/et/events/mobile/TiqetAuthScreen.kt"
+organiser_path = root / "app/src/main/java/et/events/mobile/TiqetOrganizerScreen.kt"
+
+def quality_replace(source: str, old: str, new: str, label: str) -> str:
+    count = source.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected one exact source anchor; found {count}")
+    return source.replace(old, new, 1)
+
+main = main_path.read_text()
+main = quality_replace(
+    main,
+    'val categories = listOf("All", "Music", "Comedy", "Culture", "Nightlife")',
+    'val categories = listOf("All", "Music", "Boxing Matches", "Sports", "Culture", "Nightlife", "Conference", "Other")',
+    "Customer event categories"
+)
+main = quality_replace(main, "Search events or artists", "Search events, venues or categories", "Search hint")
+main = quality_replace(
+    main,
+    'Text(if (isLoading) "UPDATING" else "ETB · LIVE LISTINGS", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)',
+    'Text(if (isLoading) "Loading" else filtered.size.toString() + " events", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)',
+    "Replace filler listing badge with actual count"
+)
+main = quality_replace(
+    main,
+    '''                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+private fun CategoryChip''',
+    '''                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        if (value.isNotBlank()) {
+            Text(
+                "×",
+                color = Muted,
+                fontSize = 20.sp,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable { onValueChange("") }
+                    .padding(horizontal = 4.dp, vertical = 2.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun CategoryChip''',
+    "Add one-tap clear search"
+)
+if "import androidx.compose.material3.CircularProgressIndicator\n" not in main:
+    main = quality_replace(
+        main,
+        "import androidx.compose.material3.MaterialTheme\n",
+        "import androidx.compose.material3.MaterialTheme\nimport androidx.compose.material3.CircularProgressIndicator\n",
+        "Loading indicator import"
+    )
+main = quality_replace(
+    main,
+    'EmptyMessage("Loading live events from Tiqet…")',
+    '''Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(25.dp),
+                        color = BrandRed,
+                        strokeWidth = 2.5.dp
+                    )
+                    Text("Finding events", color = Muted, fontSize = 12.sp)
+                }''',
+    "Customer loading state"
+)
+main = main.replace(
+    'Text(event.category.uppercase(), color = BrandRed, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)',
+    'Text(event.category, color = BrandRed, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)',
+    1
+)
+
+spotlight_section = r'''@Composable
+private fun SpotlightSection(events: List<EventCardModel>, onOpenEvent: (EventCardModel) -> Unit) {
+    Column {
+        Text("Spotlight", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            events.forEach { event -> SpotlightBannerCard(event = event, onClick = { onOpenEvent(event) }) }
+        }
+    }
+}
+
+@Composable
+private fun SpotlightBannerCard(event: EventCardModel, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .width(292.dp)
+            .height(190.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(BrandRed)
+            .clickable(onClick = onClick)
+    ) {
+        if (!event.imageUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = event.imageUrl,
+                contentDescription = event.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        }
+        Box(Modifier.fillMaxSize().background(Color(0x770D080B)))
+        Column(
+            modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(17.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text(
+                event.title,
+                color = Color.White,
+                fontSize = 20.sp,
+                lineHeight = 24.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                listOf(event.date, event.venue).filter { it.isNotBlank() }.joinToString(" · "),
+                color = Color.White.copy(alpha = 0.94f),
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+'''
+main = replace_function_by_braces(main, "private fun SpotlightSection(", spotlight_section)
+
+icon_imports = [
+    "import androidx.compose.material3.Icon\n",
+    "import androidx.compose.material.icons.Icons\n",
+    "import androidx.compose.material.icons.outlined.Explore\n",
+    "import androidx.compose.material.icons.outlined.ConfirmationNumber\n",
+    "import androidx.compose.material.icons.outlined.BookmarkBorder\n",
+    "import androidx.compose.material.icons.outlined.PersonOutline\n",
+]
+for line in icon_imports:
+    if line not in main:
+        anchor = "import androidx.compose.material3.Text\n"
+        if anchor not in main:
+            raise SystemExit("Material imports anchor missing for bottom navigation.")
+        main = main.replace(anchor, anchor + line, 1)
+
+bottom_bar = r'''@Composable
+private fun BottomBar(items: List<String>, selected: String, onSelect: (String) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.White)
+            .border(BorderStroke(0.7.dp, Hairline))
+            .padding(horizontal = 5.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        items.forEach { item ->
+            val tint = if (item == selected) BrandRed else Muted
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onSelect(item) }
+                    .padding(vertical = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                when (item) {
+                    "Discover" -> Icon(Icons.Outlined.Explore, contentDescription = "Discover", tint = tint, modifier = Modifier.size(21.dp))
+                    "Tickets" -> Icon(Icons.Outlined.ConfirmationNumber, contentDescription = "Tickets", tint = tint, modifier = Modifier.size(21.dp))
+                    "Saved" -> Icon(Icons.Outlined.BookmarkBorder, contentDescription = "Saved", tint = tint, modifier = Modifier.size(21.dp))
+                    "Profile" -> Icon(Icons.Outlined.PersonOutline, contentDescription = "Profile", tint = tint, modifier = Modifier.size(21.dp))
+                }
+                Text(item, color = tint, fontSize = 10.sp, fontWeight = if (item == selected) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
+                Box(
+                    modifier = Modifier
+                        .width(18.dp)
+                        .height(2.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(if (item == selected) BrandRed else Color.Transparent)
+                )
+            }
+        }
+    }
+}
+'''
+main = replace_function_by_braces(main, "private fun BottomBar(", bottom_bar)
+main_path.write_text(main)
+
+auth = auth_path.read_text()
+if "import androidx.compose.ui.text.input.KeyboardCapitalization\n" not in auth:
+    auth = quality_replace(
+        auth,
+        "import androidx.compose.ui.text.input.KeyboardType\n",
+        "import androidx.compose.ui.text.input.KeyboardType\nimport androidx.compose.ui.text.input.KeyboardCapitalization\n",
+        "Auth keyboard capitalization import"
+    )
+auth = quality_replace(
+    auth,
+    "keyboardOptions = KeyboardOptions(keyboardType = keyboardType),",
+    "keyboardOptions = KeyboardOptions(keyboardType = keyboardType, capitalization = if (keyboardType == KeyboardType.Email) KeyboardCapitalization.None else KeyboardCapitalization.Sentences),",
+    "Auth keyboard options"
+)
+auth_path.write_text(auth)
+
+api = api_path.read_text()
+api = quality_replace(api, 'JSONObject().put("email", email.trim())', 'JSONObject().put("email", email.trim().lowercase(Locale.ROOT))', "Signup email normalization")
+api = quality_replace(api, 'JSONObject().put("email", email.trim()).put("password", password)', 'JSONObject().put("email", email.trim().lowercase(Locale.ROOT)).put("password", password)', "Signin email normalization")
+api = quality_replace(
+    api,
+    '&status=eq.published&approval_status=eq.approved&order=starts_at.asc"',
+    '&status=eq.published&approval_status=eq.approved&order=starts_at.asc&limit=50"',
+    "Bound public event feed response"
+)
+api = quality_replace(
+    api,
+    'throw ApiException("Tiqet backend is not configured. Add SUPABASE_URL and SUPABASE_ANON_KEY to the GitHub Actions repository variables.")',
+    'throw ApiException("Tiqet is temporarily unavailable. Please try again later.")',
+    "Hide build configuration details"
+)
+api_path.write_text(api)
+
+organiser = organiser_path.read_text()
+for old, new in [
+    ('Text("SETTLEMENT LEDGER", color = OrgRed, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.2.sp)',
+     'Text("Settlement ledger", color = OrgRed, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)'),
+    ('Text("RECENT TRANSACTIONS", color = OrgMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)',
+     'Text("Recent transactions", color = OrgMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)'),
+    ('Text("EVENT BANNER", color = OrgInk, fontWeight = FontWeight.Bold, fontSize = 11.sp, letterSpacing = 0.8.sp)',
+     'Text("Event banner", color = OrgInk, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)'),
+    ('Text("TICKET OPTIONS", color = OrgInk, fontWeight = FontWeight.Bold, fontSize = 12.sp, letterSpacing = 0.8.sp)',
+     'Text("Ticket options", color = OrgInk, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)')
+]:
+    if old in organiser:
+        organiser = organiser.replace(old, new, 1)
+organiser = organiser.replace(
+    '        Text(label, color = OrgRed, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.3.sp)\n        Spacer(Modifier.height(7.dp))\n',
+    '        Spacer(Modifier.height(2.dp))\n',
+    1
+)
+organiser_path.write_text(organiser)
+
+final_main = main_path.read_text()
+final_api = api_path.read_text()
+final_auth = auth_path.read_text()
+final_org = organiser_path.read_text()
+for item in ('Boxing Matches', 'Search events, venues or categories', 'SpotlightBannerCard',
+             'Icons.Outlined.Explore', 'Icons.Outlined.ConfirmationNumber', 'CircularProgressIndicator'):
+    if item not in final_main:
+        raise SystemExit(f"TIQET quality assertion failed: missing {item}")
+for item in ('limit=50', 'lowercase(Locale.ROOT)', 'temporarily unavailable. Please try again later.'):
+    if item not in final_api:
+        raise SystemExit(f"TIQET API quality assertion failed: missing {item}")
+if 'KeyboardCapitalization.None' not in final_auth:
+    raise SystemExit("TIQET auth keyboard assertion failed.")
+if 'EVENT BANNER' in final_org or 'TICKET OPTIONS' in final_org:
+    raise SystemExit("TIQET organiser label cleanup did not apply.")
+print("TIQET quality pass: discovery UX, Spotlight hierarchy, icon navigation, auth input handling, bounded feed reads and safer configuration errors applied.")
