@@ -887,12 +887,25 @@ main = quality_replace(
     'if (ticketCount < 10) { ticketCount++; checkoutAttemptKey = java.util.UUID.randomUUID().toString() }',
     "New checkout key when quantity increases"
 )
-main = quality_replace(
-    main,
-    'api.createChapaCheckout(ticketTypeId, ticketCount)',
-    'api.createChapaCheckout(ticketTypeId, ticketCount, idempotencyKey = checkoutAttemptKey)',
-    "Reuse the same key on checkout retries"
+checkout_call_pattern = re.compile(
+    r'api\.(createChapaCheckout|createPaymentIntent)\((?P<args>[^()\n]*)\)'
 )
+checkout_calls = list(checkout_call_pattern.finditer(main))
+if len(checkout_calls) != 1:
+    raise SystemExit(
+        "Expected exactly one checkout API call in the event detail screen; found "
+        + str(len(checkout_calls))
+    )
+checkout_call = checkout_calls[0]
+if "idempotencyKey" not in checkout_call.group(0):
+    args = checkout_call.group("args").rstrip()
+    separator = "" if not args else ", "
+    replacement_call = (
+        "api." + checkout_call.group(1) + "(" + args
+        + separator + "idempotencyKey = checkoutAttemptKey)"
+    )
+    main = main[:checkout_call.start()] + replacement_call + main[checkout_call.end():]
+
 main = quality_replace(
     main,
     '''                                    val url = checkout.optString("checkout_url")
