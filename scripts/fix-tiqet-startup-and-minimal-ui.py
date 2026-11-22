@@ -847,12 +847,17 @@ api = quality_replace(
 )
 api = quality_replace(
     api,
-    'fun createChapaCheckout(ticketTypeId: String, quantity: Int): JSONObject =\n        createPaymentIntent(ticketTypeId, quantity, provider = "chapa")',
-    '''fun createChapaCheckout(ticketTypeId: String, quantity: Int): JSONObject =
-        createPaymentIntent(ticketTypeId, quantity, provider = "chapa")
-
-    fun createChapaCheckout(ticketTypeId: String, quantity: Int, idempotencyKey: String): JSONObject =
-        createPaymentIntent(ticketTypeId, quantity, provider = "chapa", idempotencyKey = idempotencyKey)''',
+    '''fun createChapaCheckout(ticketTypeId: String, quantity: Int, paymentMethod: String? = null): JSONObject =
+        createPaymentIntent(ticketTypeId, quantity, provider = "chapa", paymentMethod = paymentMethod)''',
+    '''fun createChapaCheckout(
+        ticketTypeId: String,
+        quantity: Int,
+        paymentMethod: String? = null,
+        idempotencyKey: String? = null
+    ): JSONObject = createPaymentIntent(
+        ticketTypeId, quantity, provider = "chapa",
+        paymentMethod = paymentMethod, idempotencyKey = idempotencyKey
+    )''',
     "Expose checkout method with stable attempt key"
 )
 api_path.write_text(api)
@@ -885,7 +890,7 @@ main = quality_replace(
 main = quality_replace(
     main,
     'api.createChapaCheckout(ticketTypeId, ticketCount)',
-    'api.createChapaCheckout(ticketTypeId, ticketCount, checkoutAttemptKey)',
+    'api.createChapaCheckout(ticketTypeId, ticketCount, idempotencyKey = checkoutAttemptKey)',
     "Reuse the same key on checkout retries"
 )
 main = quality_replace(
